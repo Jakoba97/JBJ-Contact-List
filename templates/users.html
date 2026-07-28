@@ -9,13 +9,20 @@
   <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
   <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .adm-page-header{background:linear-gradient(165deg,var(--maroon) 0%,var(--maroon-dark) 100%);color:#fff;padding:18px 28px;display:flex;align-items:center;gap:14px;box-shadow:0 4px 18px rgba(0,0,0,0.18);}
+    .adm-page-header h1{margin:0;font-family:var(--font-display);font-size:20px;font-weight:400;color:#fff;}
+    .adm-page-header .btn{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.3);color:#fff;}
+    .perm-table th, .perm-table td { padding: 10px 12px; text-align: left; vertical-align: middle; font-size: 13px; }
+    .perm-table thead th { font-weight: 600; color: var(--muted); border-bottom: 2px solid rgba(0,0,0,0.08); white-space: nowrap; }
+    .perm-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px 10px; border-radius: 20px; border: 1px solid #ddd; font-size: 12px; font-weight: 500; transition: background .15s, border-color .15s; background: #fff; }
+    .perm-toggle.on { background: #edf7ed; border-color: #4caf50; color: #2e7d32; }
+    .perm-toggle.off { background: #fafafa; border-color: #ddd; color: #888; }
+    .perm-toggle:disabled { opacity: 0.5; cursor: default; }
+    .user-row td { border-bottom: 1px solid rgba(0,0,0,0.05); }
+    .perm-section-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 0 6px; }
+  </style>
 </head>
-<style>
-  .adm-page-header{background:linear-gradient(165deg,var(--maroon) 0%,var(--maroon-dark) 100%);color:#fff;padding:18px 28px;display:flex;align-items:center;gap:14px;box-shadow:0 4px 18px rgba(0,0,0,0.18);}
-  .adm-page-header h1{margin:0;font-family:var(--font-display);font-size:20px;font-weight:400;color:#fff;}
-  .adm-page-header .btn{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.3);color:#fff;}
-  .adm-page-header .btn:hover{background:rgba(255,255,255,0.2);}
-</style>
 <body>
 
   <nav class="side-toolbar" id="sideToolbar">
@@ -60,49 +67,106 @@
     </div>
 
   <main class="container admin-area" style="padding-top:24px;">
-    <section class="card" style="max-width:420px">
+
+    <!-- ── Create new user ─────────────────────────────────────────── -->
+    <section class="card" style="max-width:480px">
       <h3>Add an employee login</h3>
       <form id="newUserForm" style="display:flex;flex-direction:column;gap:10px">
         <label>Username<br><input id="nuUsername" type="text" required autocomplete="off"></label>
         <label>Display name (shown in the app)<br><input id="nuDisplayName" type="text"></label>
         <label>Password<br><input id="nuPassword" type="password" required minlength="8" autocomplete="new-password"></label>
-        <label><input id="nuIsAdmin" type="checkbox"> Admin (can create other logins)</label>
-        <button type="submit" class="btn btn-primary"><i class="fas fa-user-plus"></i> Create user</button>
+
+        <label><input id="nuIsAdmin" type="checkbox"> <strong>Admin</strong> — full access to everything, can create other logins</label>
+
+        <div id="nuPermSection">
+          <div class="perm-section-label">Page Access</div>
+          <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <input id="nuProposals" type="checkbox">
+            <span><i class="fas fa-file-contract" style="width:16px;color:var(--maroon);"></i> Proposals</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <input id="nuEmailEvents" type="checkbox">
+            <span><i class="fas fa-envelope-open-text" style="width:16px;color:var(--maroon);"></i> Email &amp; Events</span>
+          </label>
+
+          <div class="perm-section-label">Actions</div>
+          <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <input id="nuSendEmail" type="checkbox">
+            <span><i class="fas fa-paper-plane" style="width:16px;color:var(--maroon);"></i> Can send emails &amp; campaigns</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input id="nuSocial" type="checkbox">
+            <span><i class="fas fa-share-nodes" style="width:16px;color:var(--maroon);"></i> Can post to social media</span>
+          </label>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="margin-top:4px;"><i class="fas fa-user-plus"></i> Create user</button>
       </form>
       <div id="newUserError" class="login-error" style="display:none;color:#9b1c1c;background:rgba(173,3,4,0.08);border-color:rgba(173,3,4,0.3)"></div>
     </section>
 
-    <section class="card">
+    <!-- ── Existing users ─────────────────────────────────────────── -->
+    <section class="card" style="overflow-x:auto;">
       <h3>Existing users</h3>
-      <table>
-        <thead><tr><th>Username</th><th>Display name</th><th>Admin</th><th>Can post social</th><th>Created</th><th></th></tr></thead>
+      <table class="perm-table" style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Username</th>
+            <th>Role</th>
+            <th><i class="fas fa-file-contract" title="Proposals"></i> Proposals</th>
+            <th><i class="fas fa-envelope-open-text" title="Email &amp; Events"></i> Email &amp; Events</th>
+            <th><i class="fas fa-paper-plane" title="Send Emails"></i> Send Emails</th>
+            <th><i class="fas fa-share-nodes" title="Social Media"></i> Social</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
         <tbody>
           {% for u in users %}
-          <tr>
-            <td>{{ u.username }}</td>
-            <td>{{ u.display_name }}</td>
-            <td>{{ 'Yes' if u.is_admin else '' }}</td>
+          <tr class="user-row" data-user-id="{{ u.id }}">
+            <td><strong>{{ u.display_name }}</strong></td>
+            <td class="muted">{{ u.username }}</td>
             <td>
               {% if u.is_admin %}
-                <span class="muted" style="font-size:12px;">Always (admin)</span>
+                <span style="background:var(--maroon);color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">Admin</span>
               {% else %}
-                <button class="btn btn-sm toggle-social-btn"
-                        data-user-id="{{ u.id }}"
-                        data-username="{{ u.username }}"
-                        data-enabled="{{ 'true' if u.can_post_social else 'false' }}"
-                        style="{% if u.can_post_social %}background:var(--green);color:#fff;border-color:var(--green);{% endif %}">
-                  {% if u.can_post_social %}<i class="fas fa-check"></i> Allowed{% else %}<i class="fas fa-ban"></i> Blocked{% endif %}
-                </button>
+                <span style="background:#f0f0f0;color:#555;padding:2px 8px;border-radius:10px;font-size:11px;">Staff</span>
               {% endif %}
             </td>
-            <td>{{ u.created_at.strftime('%Y-%m-%d') }}</td>
-            <td><button class="btn reset-password-btn" data-user-id="{{ u.id }}" data-username="{{ u.username }}"><i class="fas fa-key"></i> Reset Password</button></td>
+            {% if u.is_admin %}
+              <td colspan="4" style="color:var(--muted);font-size:12px;font-style:italic;">Full access (admin)</td>
+            {% else %}
+              {% for flag, val in [
+                ('can_access_proposals', u.can_access_proposals),
+                ('can_access_email_events', u.can_access_email_events),
+                ('can_send_email', u.can_send_email),
+                ('can_post_social', u.can_post_social),
+              ] %}
+              <td>
+                <button class="perm-toggle {{ 'on' if val else 'off' }}"
+                        data-user-id="{{ u.id }}"
+                        data-flag="{{ flag }}"
+                        data-value="{{ 'true' if val else 'false' }}">
+                  <i class="fas {{ 'fa-check' if val else 'fa-xmark' }}"></i>
+                  {{ 'On' if val else 'Off' }}
+                </button>
+              </td>
+              {% endfor %}
+            {% endif %}
+            <td class="muted">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+            <td>
+              <button class="btn reset-password-btn" data-user-id="{{ u.id }}" data-username="{{ u.username }}">
+                <i class="fas fa-key"></i> Reset Password
+              </button>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </section>
 
+    <!-- ── Social Connections ─────────────────────────────────────── -->
     <section class="card" style="max-width:520px">
       <h3><i class="fas fa-share-nodes"></i> Social Connections</h3>
       <p class="muted" style="margin:0 0 16px;font-size:13px;">Connect your LinkedIn and Facebook accounts to post flyers directly from the Flyer Builder.</p>
@@ -147,7 +211,6 @@
         {% endif %}
       </div>
 
-      {% with msgs = get_flashed_messages(with_categories=true) %}{% endwith %}
       {% if request.args.get('social_connected') %}
         <p style="color:green;margin-top:10px;font-size:13px;"><i class="fas fa-check-circle"></i> {{ request.args.get('social_connected')|title }} connected successfully.</p>
       {% elif request.args.get('social_disconnected') %}
@@ -156,9 +219,11 @@
         <p style="color:#9b1c1c;margin-top:10px;font-size:13px;"><i class="fas fa-exclamation-circle"></i> {{ request.args.get('social_error') }}</p>
       {% endif %}
     </section>
-  </main>
-  </div><!-- /#appMain -->
 
+  </main>
+  </div>
+
+  <!-- Reset password modal -->
   <div id="resetPasswordModal" class="modal" style="display:none;">
     <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="resetPasswordTitle" style="max-width:380px">
       <button id="closeResetModal" class="close">×</button>
@@ -173,6 +238,15 @@
   </div>
 
   <script>
+    // Hide per-permission checkboxes when Admin is checked
+    const nuIsAdmin = document.getElementById('nuIsAdmin');
+    const nuPermSection = document.getElementById('nuPermSection');
+    nuIsAdmin.addEventListener('change', () => {
+      nuPermSection.style.opacity = nuIsAdmin.checked ? '0.35' : '1';
+      nuPermSection.style.pointerEvents = nuIsAdmin.checked ? 'none' : '';
+    });
+
+    // Create user form
     document.getElementById('newUserForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const errEl = document.getElementById('newUserError');
@@ -181,7 +255,11 @@
         username: document.getElementById('nuUsername').value.trim(),
         display_name: document.getElementById('nuDisplayName').value.trim(),
         password: document.getElementById('nuPassword').value,
-        is_admin: document.getElementById('nuIsAdmin').checked,
+        is_admin: nuIsAdmin.checked,
+        can_access_proposals: document.getElementById('nuProposals').checked,
+        can_access_email_events: document.getElementById('nuEmailEvents').checked,
+        can_send_email: document.getElementById('nuSendEmail').checked,
+        can_post_social: document.getElementById('nuSocial').checked,
       };
       const res = await fetch('/api/users', {
         method: 'POST',
@@ -197,6 +275,28 @@
       }
     });
 
+    // Permission toggle buttons on existing users
+    document.querySelectorAll('.perm-toggle').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const userId = btn.dataset.userId;
+        const flag   = btn.dataset.flag;
+        const newVal = btn.dataset.value !== 'true';
+        btn.disabled = true;
+        const res = await fetch(`/api/users/${userId}/permissions`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ [flag]: newVal }),
+        });
+        btn.disabled = false;
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) { alert(j.error || 'Could not update permission.'); return; }
+        btn.dataset.value = newVal ? 'true' : 'false';
+        btn.className = 'perm-toggle ' + (newVal ? 'on' : 'off');
+        btn.innerHTML = `<i class="fas ${newVal ? 'fa-check' : 'fa-xmark'}"></i> ${newVal ? 'On' : 'Off'}`;
+      });
+    });
+
+    // Reset password modal
     let resetTargetId = null;
     const resetModal = document.getElementById('resetPasswordModal');
 
@@ -216,25 +316,8 @@
       resetModal.style.display = 'none';
     });
 
-    document.querySelectorAll('.toggle-social-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const userId = btn.dataset.userId;
-        const res = await fetch(`/api/users/${userId}/toggle-social`, { method: 'POST' });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(j.error || 'Could not update permission.'); return; }
-        const enabled = j.can_post_social;
-        btn.dataset.enabled = enabled ? 'true' : 'false';
-        btn.style.background = enabled ? 'var(--green)' : '';
-        btn.style.color = enabled ? '#fff' : '';
-        btn.style.borderColor = enabled ? 'var(--green)' : '';
-        btn.innerHTML = enabled
-          ? '<i class="fas fa-check"></i> Allowed'
-          : '<i class="fas fa-ban"></i> Blocked';
-      });
-    });
-
     document.getElementById('resetPasswordConfirmBtn').addEventListener('click', async () => {
-      const errEl = document.getElementById('resetPasswordError');
+      const errEl    = document.getElementById('resetPasswordError');
       const statusEl = document.getElementById('resetPasswordStatus');
       const password = document.getElementById('resetPasswordInput').value;
       errEl.style.display = 'none';

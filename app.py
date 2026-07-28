@@ -1,44 +1,44 @@
-import os
-import io
-import re
-import csv
-import threading
-import uuid as uuid_mod
-from datetime import date, datetime, timedelta
-from dotenv import load_dotenv
-from flask import Flask, request, jsonify, send_file, render_template, render_template_string, redirect, url_for, abort
-from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from config import Config
-from db import db
-from models import Contact, OutreachOrg, Activity, User, AuditLog, CaseStudy, EmailTemplate, FlyerTemplate, FlyerAsset, Task, SocialToken, EmailEvent, AvailabilityRule, Booking, LandingPage, LandingPageSubmission, EmailSequence, EmailSequenceStep, EmailSequenceEnrollment, Proposal, LoginEvent
-from schemas import ContactSchema
-from utils import (
-    read_uploaded_file, clean_dataframe, clean_outreach_orgs,
-    looks_like_contacts_sheet, looks_like_orgs_sheet,
+import os                       # lets the app read environment variables (like API keys) from your .env file
+import io                       # handles data in memory, like reading/writing files without saving them to disk first
+import re                       # "regular expressions" - searches for patterns inside text (e.g. find all email addresses)
+import csv                      # lets the app read and write CSV spreadsheet files (like contact exports)
+import threading                # allows multiple tasks to run at the same time in the background
+import uuid as uuid_mod         # generates unique random IDs (like "a3f9b2c1-...") for database records
+from datetime import date, datetime, timedelta  # tools for working with dates and times (today's date, adding 7 days, etc.)
+from dotenv import load_dotenv  # reads your .env file so the app can see your API keys and secrets
+from flask import Flask, request, jsonify, send_file, render_template, render_template_string, redirect, url_for, abort  # Flask is the web framework powering this site; these are its main tools for handling web requests
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user  # handles user login sessions (who is logged in, logging in/out, protecting pages that require a login)
+from flask_limiter import Limiter                # rate-limiting tool that blocks someone making too many requests too fast (e.g. brute-force login attempts)
+from flask_limiter.util import get_remote_address  # helper that identifies a visitor by their IP address so rate limiting knows who to track
+from config import Config       # imports your app's settings (database URL, secret key, etc.) from config.py
+from db import db               # your database connection - all contacts, users, emails, etc. are stored and retrieved through this
+from models import Contact, OutreachOrg, Activity, User, AuditLog, CaseStudy, EmailTemplate, FlyerTemplate, FlyerAsset, Task, SocialToken, EmailEvent, AvailabilityRule, Booking, LandingPage, LandingPageSubmission, EmailSequence, EmailSequenceStep, EmailSequenceEnrollment, Proposal, LoginEvent  # imports every database table - each word is one type of record the app can store
+from schemas import ContactSchema  # defines rules for formatting contact data when sending it to the browser as JSON
+from utils import (              # imports helper functions from utils.py for handling file uploads and data cleanup
+    read_uploaded_file, clean_dataframe, clean_outreach_orgs,  # read an uploaded file, clean its data, and clean org import data
+    looks_like_contacts_sheet, looks_like_orgs_sheet,          # detect whether an uploaded spreadsheet contains contacts or organizations
 )
-from sqlalchemy import or_, and_, func
+from sqlalchemy import or_, and_, func  # database query helpers: or_=match A or B, and_=match A and B, func=run DB functions like COUNT()
 
-load_dotenv()
+load_dotenv()  # actually reads the .env file right now - without this call, API keys stay invisible to the app
 
 # Error monitoring is opt-in: only initializes if SENTRY_DSN is set, so the
 # app runs exactly as before for local dev or anyone who hasn't created a
 # Sentry account. Without this, the only way to learn about a production
 # error is a user reporting it.
-_sentry_dsn = os.environ.get('SENTRY_DSN')
-if _sentry_dsn:
-    import sentry_sdk
-    from sentry_sdk.integrations.flask import FlaskIntegration
+_sentry_dsn = os.environ.get('SENTRY_DSN')  # checks if you have a Sentry error-monitoring account key saved in .env
+if _sentry_dsn:                              # only runs the block below if that key was found - skipped entirely otherwise
+    import sentry_sdk                        # loads Sentry, a service that records and emails you about app crashes
+    from sentry_sdk.integrations.flask import FlaskIntegration  # connects Sentry to Flask so it automatically catches web request errors
     sentry_sdk.init(
-        dsn=_sentry_dsn,
-        integrations=[FlaskIntegration()],
-        traces_sample_rate=0.0,  # error tracking only, not performance tracing
-        send_default_pii=False,  # this app holds contact PII -- don't forward any of it
+        dsn=_sentry_dsn,                     # your Sentry project address - tells the library where to send error reports
+        integrations=[FlaskIntegration()],   # enables the Flask-specific error catching plugin
+        traces_sample_rate=0.0,              # turns off performance tracking (we only want error alerts, not speed data)
+        send_default_pii=False,              # tells Sentry NOT to include personal info (names, emails) in error reports - for privacy
     )
 
-login_manager = LoginManager()
-login_manager.login_view = 'login'
+login_manager = LoginManager()      # creates the login system object that keeps track of who is currently logged in
+login_manager.login_view = 'login'  # if someone visits a protected page while logged out, send them to the login page
 
 # In-memory storage -- fine for brute-force protection on a single login
 # form, but each gunicorn worker process counts independently (no shared
@@ -46,28 +46,28 @@ login_manager.login_view = 'login'
 # (per-worker limit x worker count), not a hard global ceiling. Good
 # enough to stop naive password guessing; revisit with a shared store
 # (e.g. Redis) if that gap ever matters.
-limiter = Limiter(key_func=get_remote_address, default_limits=[])
+limiter = Limiter(key_func=get_remote_address, default_limits=[])  # sets up rate limiting - uses the visitor's IP address to track them; default_limits=[] means limits are set individually per route, not globally
 
 
 def parse_multi_param(name):
     """Several filters (county, tag, org_tag) are multi-select -- the
     frontend sends the chosen values as a single comma-joined query param
     (e.g. county=Dallas,Tarrant or tag=Chamber,Clergy)."""
-    raw = request.args.get(name, type=str)
-    if not raw:
+    raw = request.args.get(name, type=str)  # reads the URL parameter by name (e.g. ?tag=Chamber,Clergy)
+    if not raw:          # if nothing was passed, return an empty list (no filter applied)
         return []
-    return [v.strip() for v in raw.split(',') if v.strip()]
+    return [v.strip() for v in raw.split(',') if v.strip()]  # splits "Dallas,Tarrant" into ["Dallas", "Tarrant"], trimming spaces
 
 
 def split_multi(value):
     """Normalizes a tag/org_tag/county value that may arrive as a list, a
     comma-joined string, or a single plain string (e.g. from a JSON body)
     into a list."""
-    if not value:
+    if not value:                              # if the value is empty/None, return an empty list
         return []
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple)):       # if it's already a list or tuple, clean each item and return it
         return [str(v).strip() for v in value if v and str(v).strip()]
-    return [v.strip() for v in str(value).split(',') if v.strip()]
+    return [v.strip() for v in str(value).split(',') if v.strip()]  # otherwise treat it as a comma-separated string and split it
 
 
 def county_filter_clause(counties):
@@ -75,17 +75,17 @@ def county_filter_clause(counties):
     entries in Contact.county, not just an exact whole-field match --
     e.g. selecting "Dallas" should also match a contact filed under
     "Dallas, Tarrant"."""
-    if not counties:
+    if not counties:     # if no counties were selected, return None (meaning no county filter)
         return None
-    clauses = []
-    for c in counties:
-        clauses.append(or_(
-            Contact.county.ilike(c),
-            Contact.county.ilike(f"{c}, %"),
-            Contact.county.ilike(f"%, {c}"),
-            Contact.county.ilike(f"%, {c}, %"),
+    clauses = []         # start with an empty list to collect each county's filter rule
+    for c in counties:   # loop through each selected county name
+        clauses.append(or_(                           # add a rule: match this county appearing anywhere in the field
+            Contact.county.ilike(c),                  # exact match: the whole field is just this county
+            Contact.county.ilike(f"{c}, %"),           # starts with this county: "Dallas, Tarrant"
+            Contact.county.ilike(f"%, {c}"),           # ends with this county: "Tarrant, Dallas"
+            Contact.county.ilike(f"%, {c}, %"),        # middle of a list: "Collin, Dallas, Tarrant"
         ))
-    return or_(*clauses)
+    return or_(*clauses)  # return a rule that matches if ANY of the county clauses above is true
 
 
 def contact_incomplete_clause():
@@ -95,12 +95,12 @@ def contact_incomplete_clause():
     showContactDetail() in app.js), so the dashboard stat and the per-
     contact flag never disagree. Contact.data_complete is unused here --
     nothing in the UI ever sets it, so it was permanently 0%."""
-    no_email = or_(Contact.email.is_(None), Contact.email == '')
-    no_phone = and_(
-        or_(Contact.phone_office.is_(None), Contact.phone_office == ''),
-        or_(Contact.phone_cell.is_(None), Contact.phone_cell == ''),
+    no_email = or_(Contact.email.is_(None), Contact.email == '')  # true when the email field is blank or missing
+    no_phone = and_(                                               # true when BOTH phone fields are also blank
+        or_(Contact.phone_office.is_(None), Contact.phone_office == ''),   # office phone is blank
+        or_(Contact.phone_cell.is_(None), Contact.phone_cell == ''),       # cell phone is blank
     )
-    return and_(no_email, no_phone)
+    return and_(no_email, no_phone)  # a contact is "incomplete" only when email AND all phones are missing
 
 
 def filtered_contacts_query(q=None, tag=None, county=None, contact_id=None, org_tag=None, followup=None, favorites_only=False, incomplete_only=False, show_deleted=False):
@@ -118,82 +118,82 @@ def filtered_contacts_query(q=None, tag=None, county=None, contact_id=None, org_
     including never" -- a contact with no activity at all always counts as
     overdue, regardless of the threshold.
     """
-    query = Contact.query
-    if show_deleted:
-        query = query.filter(Contact.deleted_at.isnot(None))
+    query = Contact.query                                      # start with all contacts in the database
+    if show_deleted:                                           # if showing the trash/archive view...
+        query = query.filter(Contact.deleted_at.isnot(None))  # only show contacts that have been soft-deleted
     else:
-        query = query.filter(Contact.deleted_at.is_(None))
-    if contact_id:
-        query = query.filter(Contact.id == contact_id)
-    if q:
-        like = f"%{q}%"
-        full_name = func.coalesce(Contact.first_name, '') + ' ' + func.coalesce(Contact.last_name, '')
-        query = query.filter(or_(
-            full_name.ilike(like),
-            Contact.organization.ilike(like),
-            Contact.title.ilike(like),
-            Contact.email.ilike(like),
-            Contact.county.ilike(like),
+        query = query.filter(Contact.deleted_at.is_(None))    # normal view: only show contacts that are NOT deleted
+    if contact_id:                                             # if a specific contact ID was requested...
+        query = query.filter(Contact.id == contact_id)        # filter down to just that one contact
+    if q:                                                      # if there is a search term typed in the search box...
+        like = f"%{q}%"                                        # wrap the search term with % wildcards (matches anywhere in the field)
+        full_name = func.coalesce(Contact.first_name, '') + ' ' + func.coalesce(Contact.last_name, '')  # combine first and last name into one searchable field
+        query = query.filter(or_(                              # match any contact where the search term appears in any of these fields:
+            full_name.ilike(like),                             # full name (first + last)
+            Contact.organization.ilike(like),                  # organization name
+            Contact.title.ilike(like),                         # job title
+            Contact.email.ilike(like),                         # email address
+            Contact.county.ilike(like),                        # county
         ))
-    if tag:
-        tags = split_multi(tag)
+    if tag:                                                    # if a People category filter (tag) is selected...
+        tags = split_multi(tag)                                # split it into a list (e.g. "Chamber,Clergy" → ["Chamber","Clergy"])
         if tags:
-            query = query.filter(Contact.tag.in_(tags))
-    if org_tag:
-        org_tags = split_multi(org_tag)
-        org_names = [o[0].lower() for o in db.session.query(OutreachOrg.organization).filter(OutreachOrg.tag.in_(org_tags)).all() if o[0]]
-        if not org_names:
+            query = query.filter(Contact.tag.in_(tags))        # only return contacts whose tag matches one of the selected values
+    if org_tag:                                                # if an Organizations category filter is selected...
+        org_tags = split_multi(org_tag)                        # split the org tags into a list
+        org_names = [o[0].lower() for o in db.session.query(OutreachOrg.organization).filter(OutreachOrg.tag.in_(org_tags)).all() if o[0]]  # look up which organization names belong to those org tags
+        if not org_names:                                      # if no organizations match those tags, return zero results
             return query.filter(False)
-        query = query.filter(func.lower(Contact.organization).in_(org_names))
-    if county:
-        counties = split_multi(county)
-        clause = county_filter_clause(counties)
+        query = query.filter(func.lower(Contact.organization).in_(org_names))  # only keep contacts whose organization is in that list
+    if county:                                                 # if a county filter is selected...
+        counties = split_multi(county)                         # split into a list of county names
+        clause = county_filter_clause(counties)                # build the flexible county matching rule (handles "Dallas, Tarrant" combos)
         if clause is not None:
-            query = query.filter(clause)
-    if followup:
+            query = query.filter(clause)                       # apply the county filter
+    if followup:                                               # if a follow-up filter is selected (e.g. "No contact in 30 days")...
         last_contacted = (
             db.session.query(Activity.contact_id, func.max(Activity.contacted_on).label('last_contacted'))
-            .group_by(Activity.contact_id)
-            .subquery()
+            .group_by(Activity.contact_id)                     # for each contact, find the date of their most recent activity log entry
+            .subquery()                                        # treat this as a mini sub-table we can join against
         )
-        query = query.outerjoin(last_contacted, last_contacted.c.contact_id == Contact.id)
-        if followup == 'never':
+        query = query.outerjoin(last_contacted, last_contacted.c.contact_id == Contact.id)  # attach the last-contacted date to each contact row
+        if followup == 'never':                                # "never contacted" filter: only contacts with no activity at all
             query = query.filter(last_contacted.c.last_contacted.is_(None))
         else:
             try:
-                cutoff = date.today() - timedelta(days=int(followup))
+                cutoff = date.today() - timedelta(days=int(followup))  # calculate the cutoff date (e.g. today minus 30 days)
             except (TypeError, ValueError):
-                cutoff = None
+                cutoff = None                                  # if the followup value isn't a valid number, skip the filter
             if cutoff is not None:
                 query = query.filter(or_(
-                    last_contacted.c.last_contacted.is_(None),
-                    last_contacted.c.last_contacted < cutoff,
+                    last_contacted.c.last_contacted.is_(None),         # include contacts with no activity at all
+                    last_contacted.c.last_contacted < cutoff,          # include contacts not contacted since before the cutoff date
                 ))
-    if favorites_only:
-        query = query.filter(Contact.is_favorite == True)
-    if incomplete_only:
-        query = query.filter(contact_incomplete_clause())
-    return query
+    if favorites_only:                                         # if the Favorites filter is on...
+        query = query.filter(Contact.is_favorite == True)     # only return contacts the user has starred
+    if incomplete_only:                                        # if the Incomplete filter is on...
+        query = query.filter(contact_incomplete_clause())      # only return contacts with no email and no phone
+    return query                                               # return the final filtered query (caller will call .all() or .count() on it)
 
 
 def log_audit(action, entity_type, entity_id=None, entity_label=None, details=None):
     """Records who did what, for the admin-only Audit Log page. Commits on
     its own -- callers should already have committed the actual change, so
     a failure here never rolls back the change it's describing."""
-    entry = AuditLog(
-        user_id=current_user.id if current_user.is_authenticated else None,
-        actor_name=current_user.display_name if current_user.is_authenticated else 'System',
-        action=action,
-        entity_type=entity_type,
-        entity_id=entity_id,
-        entity_label=entity_label,
-        details=details,
+    entry = AuditLog(                                                               # create a new audit log record
+        user_id=current_user.id if current_user.is_authenticated else None,        # the ID of the logged-in user (or None if system did it)
+        actor_name=current_user.display_name if current_user.is_authenticated else 'System',  # the display name shown in the audit log
+        action=action,          # the action code, e.g. "contact_updated"
+        entity_type=entity_type,  # what kind of thing was acted on, e.g. "contact"
+        entity_id=entity_id,    # the database ID of the specific record that was changed
+        entity_label=entity_label,  # a human-readable name for the record, e.g. "Jane Doe"
+        details=details,        # a dictionary with extra info (old/new values for edits, counts for imports, etc.)
     )
-    db.session.add(entry)
-    db.session.commit()
+    db.session.add(entry)   # queue the audit log record to be saved
+    db.session.commit()     # actually save it to the database right now
 
 
-ACTION_LABELS = {
+ACTION_LABELS = {                                              # maps internal action codes to friendly labels shown in the audit log UI
     'contact_created': 'Added contact',
     'contact_updated': 'Edited contact',
     'contact_deleted': 'Deleted contact',
@@ -219,38 +219,38 @@ def format_audit_details(action, details):
     """Turns an AuditLog row's raw `details` JSON into a one-line, readable
     summary for the audit log page -- the shape of `details` differs per
     action (a field-diff for edits, import counts for a sync, etc)."""
-    d = details or {}
-    if action == 'contact_updated':
+    d = details or {}                                          # if details is None, treat it as an empty dictionary
+    if action == 'contact_updated':                            # for edits, list every changed field with old → new values
         parts = []
-        for field, change in d.items():
-            parts.append(f"{field}: \"{change.get('old') or ''}\" → \"{change.get('new') or ''}\"")
-        return '; '.join(parts)
-    if action == 'spreadsheet_sync':
-        c = d.get('contacts', {})
-        o = d.get('organizations', {})
+        for field, change in d.items():                        # loop through each changed field
+            parts.append(f"{field}: \"{change.get('old') or ''}\" → \"{change.get('new') or ''}\"")  # format as: fieldname: "old" → "new"
+        return '; '.join(parts)                                # join all changed fields into one line separated by semicolons
+    if action == 'spreadsheet_sync':                           # for spreadsheet imports, show counts of what changed
+        c = d.get('contacts', {})                              # get the contacts section of the import summary
+        o = d.get('organizations', {})                         # get the organizations section
         return (
             f"Contacts: {c.get('inserted', 0)} new, {c.get('updated', 0)} updated · "
             f"Organizations: {o.get('inserted', 0)} new, {o.get('updated', 0)} updated"
         )
-    if action == 'user_created':
+    if action == 'user_created':                               # for new user accounts, show what access level they got
         return 'Admin access' if d.get('is_admin') else 'Standard access'
-    if action == 'case_study_uploaded':
+    if action == 'case_study_uploaded':                        # for case study uploads, show how many files and their names
         titles = d.get('titles') or []
-        return f"{d.get('count', len(titles))} file(s): {', '.join(titles[:5])}{'...' if len(titles) > 5 else ''}"
-    if action == 'email_template_sent':
+        return f"{d.get('count', len(titles))} file(s): {', '.join(titles[:5])}{'...' if len(titles) > 5 else ''}"  # cap at first 5 titles to keep it readable
+    if action == 'email_template_sent':                        # for sent emails, show who it was sent to and how many attachments
         attachment_count = d.get('attachment_count', 0)
         suffix = f" with {attachment_count} attachment(s)" if attachment_count else ''
         return f"To: {d.get('to', '')}{suffix}"
-    return ''
+    return ''                                                  # for any other action type with no special formatting, return blank
 
 
 def format_audit_summary(entry):
     """Builds the one-line "what happened" summary shown per row on the
     Audit Log page, e.g. 'Edited contact Jane Doe -- title: "" -> "Mayor"'."""
-    action_label = ACTION_LABELS.get(entry.action, entry.action)
-    line = f"{action_label} {entry.entity_label}" if entry.entity_label else action_label
-    detail = format_audit_details(entry.action, entry.details)
-    return f"{line} - {detail}" if detail else line
+    action_label = ACTION_LABELS.get(entry.action, entry.action)              # look up the friendly label (e.g. "Edited contact"), falling back to the raw code
+    line = f"{action_label} {entry.entity_label}" if entry.entity_label else action_label  # combine label + name, e.g. "Edited contact Jane Doe"
+    detail = format_audit_details(entry.action, entry.details)                # get the detail string (old→new values, counts, etc.)
+    return f"{line} - {detail}" if detail else line                           # combine into one line, or return just the label if no detail
 
 
 def _bootstrap_admin_user():
@@ -262,20 +262,20 @@ def _bootstrap_admin_user():
     tab instead. Only fires while the users table is empty, so it can't
     be replayed later to reset someone's password.
     """
-    if User.query.count() > 0:
+    if User.query.count() > 0:  # if ANY users already exist in the database, skip this entirely (don't overwrite existing accounts)
         return
-    username = os.environ.get('BOOTSTRAP_ADMIN_USERNAME')
-    password = os.environ.get('BOOTSTRAP_ADMIN_PASSWORD')
-    if not username or not password:
+    username = os.environ.get('BOOTSTRAP_ADMIN_USERNAME')  # read the desired admin username from .env
+    password = os.environ.get('BOOTSTRAP_ADMIN_PASSWORD')  # read the desired admin password from .env
+    if not username or not password:  # if either is missing, abort - we can't create an account without both
         return
-    display_name = os.environ.get('BOOTSTRAP_ADMIN_DISPLAY_NAME', username)
-    user = User(username=username, display_name=display_name, is_admin=True)
-    user.set_password(password)
-    db.session.add(user)
-    db.session.commit()
+    display_name = os.environ.get('BOOTSTRAP_ADMIN_DISPLAY_NAME', username)  # read a display name from .env, defaulting to the username if not set
+    user = User(username=username, display_name=display_name, is_admin=True)  # create the admin User object
+    user.set_password(password)   # hash the password securely before storing it (never stored as plain text)
+    db.session.add(user)          # queue the new user record to be saved
+    db.session.commit()           # save the new admin account to the database
 
 
-_SHEET_FIELDS = [
+_SHEET_FIELDS = [                        # the list of contact fields that can be updated when syncing from a spreadsheet
     'first_name', 'last_name', 'organization', 'title',
     'phone_office', 'phone_cell', 'phone_personal', 'phone_misc',
     'active', 'county', 'notes', 'tag', 'industry', 'email_status',
@@ -294,61 +294,61 @@ def _import_contacts(df, result, archive_missing=False):
     at O(1) rather than O(n), which is critical for large sheets (24K+
     rows would time out on a remote database with per-row lookups).
     """
-    cleaned = clean_dataframe(df)
+    cleaned = clean_dataframe(df)  # run the raw spreadsheet data through our cleaner (normalizes column names, strips whitespace, etc.)
 
     # Flush any pending writes before querying so the query doesn't trigger
     # an autoflush mid-import (which would fail if a prior sheet wrote a row
     # that violates a column constraint before we widened it).
-    db.session.flush()
+    db.session.flush()  # push any queued-but-not-yet-saved database changes so our query sees a consistent state
 
     # One query to load every existing contact
-    all_existing = Contact.query.all()
-    by_email   = {c.email.strip().lower(): c for c in all_existing if c.email}
-    by_nameorg = {
+    all_existing = Contact.query.all()  # load all contacts from the database in one shot (faster than querying one-by-one per row)
+    by_email   = {c.email.strip().lower(): c for c in all_existing if c.email}  # build a lookup dict: email → contact object, for fast matching
+    by_nameorg = {                       # for contacts without an email, build a lookup by (first name, last name, organization)
         (
             (c.first_name  or '').lower(),
             (c.last_name   or '').lower(),
             (c.organization or '').lower(),
         ): c
-        for c in all_existing if not c.email
+        for c in all_existing if not c.email  # only include contacts that have no email (those with email use the by_email dict above)
     }
 
-    seen_emails   = set()
-    seen_nameorgs = set()
+    seen_emails   = set()   # track which emails we've processed so far in this import (to detect duplicates within the file)
+    seen_nameorgs = set()   # track which name+org combos we've processed (for contacts without emails)
 
-    for row in cleaned:
-        email = (row.get('email') or '').strip()
-        if email:
-            existing = by_email.get(email.lower())
-            seen_emails.add(email.lower())
-        else:
+    for row in cleaned:                                # loop through each row (contact) in the cleaned spreadsheet
+        email = (row.get('email') or '').strip()       # get the email from this row, or blank string if missing
+        if email:                                      # if this row has an email address...
+            existing = by_email.get(email.lower())     # look up whether we already have a contact with this email
+            seen_emails.add(email.lower())             # mark this email as seen so duplicates in the same file don't get double-inserted
+        else:                                          # if no email, match by name + organization instead
             fn  = (row.get('first_name')   or '').lower()
             ln  = (row.get('last_name')    or '').lower()
             org = (row.get('organization') or '').lower()
-            existing = by_nameorg.get((fn, ln, org))
-            seen_nameorgs.add((fn, ln, org))
+            existing = by_nameorg.get((fn, ln, org))   # look up whether we already have a contact with this exact name+org combo
+            seen_nameorgs.add((fn, ln, org))           # mark as seen
 
-        if existing:
-            changed = False
-            for field in _SHEET_FIELDS:
-                val = row.get(field)
-                if val and val != getattr(existing, field):
-                    setattr(existing, field, val)
-                    changed = True
-            existing_lists = existing.lists or []
-            new_lists = row.get('lists') or []
-            merged = list(dict.fromkeys(existing_lists + new_lists))
-            if merged != existing_lists:
-                existing.lists = merged
+        if existing:                                   # if a matching contact already exists in the database...
+            changed = False                            # track whether we actually changed anything
+            for field in _SHEET_FIELDS:                # loop through every updatable field
+                val = row.get(field)                   # get the value from the spreadsheet row
+                if val and val != getattr(existing, field):  # if the spreadsheet has a non-blank value that differs from what's in the database...
+                    setattr(existing, field, val)      # update the contact's field with the new value
+                    changed = True                     # mark that we changed something
+            existing_lists = existing.lists or []      # get the contact's current email list memberships
+            new_lists = row.get('lists') or []         # get the list memberships from the spreadsheet
+            merged = list(dict.fromkeys(existing_lists + new_lists))  # combine both lists, removing duplicates while preserving order
+            if merged != existing_lists:               # if the merged list is different from what was there before...
+                existing.lists = merged                # update the contact's list memberships
                 changed = True
-            if existing.data_complete != bool(row.get('data_complete')):
+            if existing.data_complete != bool(row.get('data_complete')):  # if the "data complete" flag changed...
                 existing.data_complete = bool(row.get('data_complete'))
                 changed = True
             if changed:
-                result['updated'] += 1
+                result['updated'] += 1                 # count this row as an update
             else:
-                result['skipped'] += 1
-        else:
+                result['skipped'] += 1                 # nothing changed, count as skipped
+        else:                                          # no existing contact found — create a brand new one
             c = Contact(
                 tag=row.get('tag') or None,
                 organization=row.get('organization') or None,
@@ -383,54 +383,54 @@ def _import_contacts(df, result, archive_missing=False):
                 certifying_agency=row.get('certifying_agency') or None,
                 data_complete=bool(row.get('data_complete')),
             )
-            db.session.add(c)
+            db.session.add(c)   # queue the new contact to be saved to the database
             # Register in lookup so duplicate rows in the same file don't re-insert
             if email:
-                by_email[email.lower()] = c
-            result['inserted'] += 1
+                by_email[email.lower()] = c  # add to our in-memory lookup so a duplicate row later in the file matches this new contact
+            result['inserted'] += 1          # count this row as a new insert
 
-    if archive_missing:
+    if archive_missing:                      # if "archive missing contacts" was requested (full sync mode)...
         archived = 0
-        for c in all_existing:
-            if (c.active or '').lower() == 'inactive':
+        for c in all_existing:              # loop through every contact that was in the database before this import
+            if (c.active or '').lower() == 'inactive':  # skip contacts already marked Inactive
                 continue
-            if c.email and c.email.lower() in seen_emails:
+            if c.email and c.email.lower() in seen_emails:  # skip contacts whose email appeared in the spreadsheet (they're still active)
                 continue
-            if not c.email:
+            if not c.email:                # for contacts without email, check if their name+org appeared in the spreadsheet
                 key = (
                     (c.first_name  or '').lower(),
                     (c.last_name   or '').lower(),
                     (c.organization or '').lower(),
                 )
-                if key in seen_nameorgs:
+                if key in seen_nameorgs:   # this contact was in the spreadsheet, so keep them active
                     continue
-            c.active = 'Inactive'
+            c.active = 'Inactive'          # contact was NOT in the spreadsheet - mark them Inactive (archive)
             archived += 1
-        result['archived'] = archived
+        result['archived'] = archived      # record how many contacts were archived in the result summary
 
 
 def _import_orgs(df, result):
     """Upsert an Organizations-sheet DataFrame into OutreachOrg, matching
     existing rows by (tag, organization)."""
-    cleaned = clean_outreach_orgs(df)
-    for row in cleaned:
-        existing = OutreachOrg.query.filter_by(tag=row['tag'], organization=row['organization']).first()
-        if existing:
+    cleaned = clean_outreach_orgs(df)                                          # run the org spreadsheet through our cleaner
+    for row in cleaned:                                                        # loop through each organization row
+        existing = OutreachOrg.query.filter_by(tag=row['tag'], organization=row['organization']).first()  # check if this org already exists (matched by tag + name)
+        if existing:                                                           # if it already exists, check if anything needs updating
             changed = False
-            if row.get('updated') and existing.updated != row['updated']:
+            if row.get('updated') and existing.updated != row['updated']:     # if the "last updated" date changed...
                 existing.updated = row['updated']
                 changed = True
-            if row.get('notes') and existing.notes != row['notes']:
+            if row.get('notes') and existing.notes != row['notes']:           # if the notes changed...
                 existing.notes = row['notes']
                 changed = True
             if changed:
-                db.session.add(existing)
+                db.session.add(existing)    # queue the update to be saved
                 result['updated'] += 1
             else:
-                result['skipped'] += 1
-        else:
+                result['skipped'] += 1      # nothing changed, skip it
+        else:                               # org doesn't exist yet - create a new record
             rec = OutreachOrg(tag=row['tag'], organization=row['organization'], updated=row.get('updated'), notes=row.get('notes'))
-            db.session.add(rec)
+            db.session.add(rec)             # queue the new org to be saved
             result['inserted'] += 1
 
 
@@ -440,33 +440,33 @@ def extract_case_study_text(file_storage):
     None. Native Google Docs aren't readable here (no Drive API access);
     the user has to export them to .docx or PDF first via Drive's
     Download menu, same as old binary .doc files."""
-    filename = file_storage.filename or ''
-    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    filename = file_storage.filename or ''                     # get the uploaded filename
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''  # extract the file extension (e.g. "pdf" or "docx")
 
-    if ext == 'pdf':
-        from pypdf import PdfReader
+    if ext == 'pdf':                                           # if the uploaded file is a PDF...
+        from pypdf import PdfReader                            # import the PDF-reading library
         try:
-            reader = PdfReader(file_storage.stream)
-            text = '\n'.join((page.extract_text() or '') for page in reader.pages)
+            reader = PdfReader(file_storage.stream)            # open the PDF from the uploaded file stream
+            text = '\n'.join((page.extract_text() or '') for page in reader.pages)  # extract text from every page and join it
         except Exception as e:
-            return None, f'Could not read this PDF: {e}'
-    elif ext == 'docx':
-        from docx import Document as DocxReader
+            return None, f'Could not read this PDF: {e}'      # if reading fails, return an error message
+    elif ext == 'docx':                                        # if the uploaded file is a Word document...
+        from docx import Document as DocxReader               # import the Word-reading library
         try:
-            doc = DocxReader(file_storage.stream)
-            text = '\n'.join(p.text for p in doc.paragraphs)
+            doc = DocxReader(file_storage.stream)             # open the Word doc from the uploaded file stream
+            text = '\n'.join(p.text for p in doc.paragraphs)  # extract text from every paragraph and join it
         except Exception as e:
-            return None, f'Could not read this Word document: {e}'
-    else:
+            return None, f'Could not read this Word document: {e}'  # if reading fails, return an error message
+    else:                                                      # if it's any other file type we don't support...
         return None, (
             f'Unsupported file type ".{ext or "unknown"}" -- only .pdf and .docx are supported. '
             'Native Google Docs need to be exported first (File > Download > Microsoft Word or PDF).'
         )
 
-    text = text.strip()
-    if len(text) < 30:
+    text = text.strip()                                        # remove leading/trailing blank space from the extracted text
+    if len(text) < 30:                                         # if the text is extremely short, the file was probably a scanned image with no real text
         return None, 'Could not find readable text in this file (it may be a scanned/image-only PDF).'
-    return text, None
+    return text, None                                          # success: return the text and no error
 
 
 def absolutize_static_urls(html, base_url):
@@ -475,85 +475,85 @@ def absolutize_static_urls(html, base_url):
     request's host. A relative path only resolves inside the browser tab
     it was inserted in -- a recipient's email client has no "current
     page" to resolve it against, so it just shows a broken image."""
-    base = base_url.rstrip('/')
-    return re.sub(r'(src|href)="(/static/[^"]*)"', lambda m: f'{m.group(1)}="{base}{m.group(2)}"', html)
+    base = base_url.rstrip('/')                                # remove any trailing slash from the base URL
+    return re.sub(r'(src|href)="(/static/[^"]*)"', lambda m: f'{m.group(1)}="{base}{m.group(2)}"', html)  # find all relative /static/... links and add the full domain in front
 
 
 def _sg_from():
     """Returns (from_email, from_name) from env vars."""
-    from_email = os.environ.get('SMTP_FROM_EMAIL') or os.environ.get('SENDGRID_FROM_EMAIL')
-    from_name  = os.environ.get('SMTP_FROM_NAME', 'JBJ Management')
-    return from_email, from_name
+    from_email = os.environ.get('SMTP_FROM_EMAIL') or os.environ.get('SENDGRID_FROM_EMAIL')  # read the "From" email address from .env (tries both names)
+    from_name  = os.environ.get('SMTP_FROM_NAME', 'JBJ Management')  # read the "From" display name from .env, defaulting to "JBJ Management"
+    return from_email, from_name                               # return both as a pair
 
 
 def send_email_smtp(to_email, subject, html_body, attachments=None):
     """Send one email. Uses SendGrid HTTP API if SENDGRID_API_KEY is set
     (bypasses SMTP port blocking on cloud hosts); falls back to SMTP
     otherwise."""
-    api_key = os.environ.get('SENDGRID_API_KEY')
-    if api_key:
+    api_key = os.environ.get('SENDGRID_API_KEY')              # check if a SendGrid API key is configured
+    if api_key:                                                # if yes, use SendGrid (preferred - works on cloud hosts like Render)
         _sendgrid_api_single(api_key, to_email, subject, html_body, attachments)
         return
     # SMTP fallback
-    import smtplib
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-    from email.mime.application import MIMEApplication
+    import smtplib                                             # Python's built-in email-sending library
+    from email.mime.multipart import MIMEMultipart             # builds multi-part email messages (body + attachments)
+    from email.mime.text import MIMEText                       # wraps the HTML body as an email part
+    from email.mime.application import MIMEApplication         # wraps file attachments as email parts
 
-    host = os.environ.get('SMTP_HOST')
+    host = os.environ.get('SMTP_HOST')                        # your email server address from .env
     if not host:
-        raise RuntimeError('Email sending is not configured on the server.')
-    port      = int(os.environ.get('SMTP_PORT', '587'))
-    username  = os.environ.get('SMTP_USERNAME')
-    password  = os.environ.get('SMTP_PASSWORD')
-    from_email, from_name = _sg_from()
-    from_email = from_email or username
-    use_tls = os.environ.get('SMTP_USE_TLS', 'true').strip().lower() not in ('0', 'false', 'no')
+        raise RuntimeError('Email sending is not configured on the server.')  # fail clearly if no email server is configured
+    port      = int(os.environ.get('SMTP_PORT', '587'))       # SMTP port (default 587 for TLS)
+    username  = os.environ.get('SMTP_USERNAME')               # SMTP login username from .env
+    password  = os.environ.get('SMTP_PASSWORD')               # SMTP login password from .env
+    from_email, from_name = _sg_from()                        # get the "From" address and display name
+    from_email = from_email or username                        # if no explicit from address, use the SMTP username
+    use_tls = os.environ.get('SMTP_USE_TLS', 'true').strip().lower() not in ('0', 'false', 'no')  # whether to use TLS encryption (defaults to true)
 
-    msg = MIMEMultipart('mixed')
-    msg['Subject'] = subject or '(no subject)'
-    msg['From'] = f'{from_name} <{from_email}>'
-    msg['To'] = to_email
-    alt = MIMEMultipart('alternative')
-    alt.attach(MIMEText(html_body, 'html'))
-    msg.attach(alt)
-    for filename, mimetype, data in (attachments or []):
-        part = MIMEApplication(data, Name=filename)
-        part['Content-Disposition'] = f'attachment; filename="{filename}"'
-        msg.attach(part)
-    with smtplib.SMTP(host, port, timeout=20) as server:
+    msg = MIMEMultipart('mixed')                              # create a new email message container
+    msg['Subject'] = subject or '(no subject)'               # set the email subject line
+    msg['From'] = f'{from_name} <{from_email}>'              # set the From header (e.g. "JBJ Management <info@jbj.com>")
+    msg['To'] = to_email                                      # set the To header
+    alt = MIMEMultipart('alternative')                        # create an inner container for the email body
+    alt.attach(MIMEText(html_body, 'html'))                   # add the HTML body to the message
+    msg.attach(alt)                                           # attach the body container to the main message
+    for filename, mimetype, data in (attachments or []):      # loop through any file attachments
+        part = MIMEApplication(data, Name=filename)           # wrap the file data as an attachment part
+        part['Content-Disposition'] = f'attachment; filename="{filename}"'  # tell the email client this is a downloadable file
+        msg.attach(part)                                      # add the attachment to the email
+    with smtplib.SMTP(host, port, timeout=20) as server:     # open a connection to the SMTP server
         if use_tls:
-            server.starttls()
+            server.starttls()                                 # upgrade the connection to TLS encryption
         if username and password:
-            server.login(username, password)
-        server.sendmail(from_email, [to_email], msg.as_string())
+            server.login(username, password)                  # authenticate with the email server
+        server.sendmail(from_email, [to_email], msg.as_string())  # actually send the email
 
 
 def _sendgrid_api_single(api_key, to_email, subject, html_body, attachments=None):
     """Send one email via SendGrid HTTP API (HTTPS, never blocked)."""
-    import requests, base64
-    from_email, from_name = _sg_from()
+    import requests, base64                                    # requests makes HTTP calls; base64 encodes attachments for the API
+    from_email, from_name = _sg_from()                        # get the From address and name from .env
     if not from_email:
-        raise RuntimeError('Set SMTP_FROM_EMAIL in environment variables.')
+        raise RuntimeError('Set SMTP_FROM_EMAIL in environment variables.')  # can't send without a From address
 
-    payload = {
-        'personalizations': [{'to': [{'email': to_email}]}],
-        'from': {'email': from_email, 'name': from_name},
-        'subject': subject or '(no subject)',
-        'content': [{'type': 'text/html', 'value': html_body}],
+    payload = {                                                # build the JSON body for the SendGrid API request
+        'personalizations': [{'to': [{'email': to_email}]}],  # who the email is going to
+        'from': {'email': from_email, 'name': from_name},     # who the email is from
+        'subject': subject or '(no subject)',                  # email subject line
+        'content': [{'type': 'text/html', 'value': html_body}],  # the HTML email body
     }
-    if attachments:
+    if attachments:                                            # if there are file attachments, add them to the payload
         payload['attachments'] = [
-            {'content': base64.b64encode(data).decode(), 'filename': fname,
+            {'content': base64.b64encode(data).decode(), 'filename': fname,  # base64-encode each file's raw bytes
              'type': mime, 'disposition': 'attachment'}
-            for fname, mime, data in attachments
+            for fname, mime, data in attachments              # loop through each (filename, mimetype, data) tuple
         ]
-    res = requests.post(
+    res = requests.post(                                       # send the HTTP POST request to SendGrid
         'https://api.sendgrid.com/v3/mail/send',
-        headers={'Authorization': f'Bearer {api_key}'},
-        json=payload, timeout=30,
+        headers={'Authorization': f'Bearer {api_key}'},       # authenticate with the SendGrid API key
+        json=payload, timeout=30,                             # send the payload as JSON, wait up to 30 seconds
     )
-    if res.status_code not in (200, 202):
+    if res.status_code not in (200, 202):                     # SendGrid returns 202 on success; anything else is an error
         raise RuntimeError(f'SendGrid error {res.status_code}: {res.text[:300]}')
 
 
@@ -561,51 +561,51 @@ def send_flyer_bulk_smtp(recipients, subject, html_body, png_bytes=None, png_fil
     """Bulk-send a flyer to a list of recipients. Uses SendGrid HTTP API
     when SENDGRID_API_KEY is set (BCC batches of 500); falls back to
     SMTP BCC batches of 50. Returns (sent_count, failed_count)."""
-    api_key = os.environ.get('SENDGRID_API_KEY')
-    if api_key:
+    api_key = os.environ.get('SENDGRID_API_KEY')              # check if SendGrid is configured
+    if api_key:                                                # if yes, use SendGrid (handles large batches much better)
         return _sendgrid_api_bulk(api_key, recipients, subject, html_body, png_bytes, png_filename)
     # SMTP fallback
-    import smtplib
+    import smtplib                                             # Python's built-in email library
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
     from email.mime.application import MIMEApplication
 
-    host = os.environ.get('SMTP_HOST')
+    host = os.environ.get('SMTP_HOST')                        # SMTP server address from .env
     if not host:
         raise RuntimeError('Email sending is not configured on the server.')
-    port      = int(os.environ.get('SMTP_PORT', '587'))
+    port      = int(os.environ.get('SMTP_PORT', '587'))       # SMTP port (default 587)
     username  = os.environ.get('SMTP_USERNAME')
     password  = os.environ.get('SMTP_PASSWORD')
     from_email, from_name = _sg_from()
     from_email = from_email or username
     use_tls = os.environ.get('SMTP_USE_TLS', 'true').strip().lower() not in ('0', 'false', 'no')
 
-    BATCH = 50
-    sent = failed = 0
-    with smtplib.SMTP(host, port, timeout=30) as server:
+    BATCH = 50                                                 # send 50 recipients per email via SMTP BCC (SMTP servers often limit this)
+    sent = failed = 0                                          # track how many succeeded and failed
+    with smtplib.SMTP(host, port, timeout=30) as server:      # open one SMTP connection and reuse it for all batches
         if use_tls:
-            server.starttls()
+            server.starttls()                                  # upgrade to TLS encryption
         if username and password:
-            server.login(username, password)
-        for i in range(0, len(recipients), BATCH):
-            batch = recipients[i:i + BATCH]
-            msg = MIMEMultipart('mixed')
+            server.login(username, password)                   # log in to the SMTP server
+        for i in range(0, len(recipients), BATCH):             # loop through recipients in chunks of 50
+            batch = recipients[i:i + BATCH]                    # take the next batch of up to 50 email addresses
+            msg = MIMEMultipart('mixed')                       # build a new email message for this batch
             msg['Subject'] = subject or '(no subject)'
             msg['From'] = f'{from_name} <{from_email}>'
-            msg['To']   = f'{from_name} <{from_email}>'
+            msg['To']   = f'{from_name} <{from_email}>'       # "To" shows as the sender (recipients are in BCC for privacy)
             alt = MIMEMultipart('alternative')
-            alt.attach(MIMEText(html_body, 'html'))
+            alt.attach(MIMEText(html_body, 'html'))            # add the HTML body
             msg.attach(alt)
-            if png_bytes:
+            if png_bytes:                                      # if a flyer image was provided, attach it
                 part = MIMEApplication(png_bytes, Name=png_filename)
                 part['Content-Disposition'] = f'attachment; filename="{png_filename}"'
                 msg.attach(part)
             try:
-                server.sendmail(from_email, [from_email] + batch, msg.as_string())
-                sent += len(batch)
+                server.sendmail(from_email, [from_email] + batch, msg.as_string())  # send to this batch (BCC)
+                sent += len(batch)                             # count successes
             except Exception:
-                failed += len(batch)
-    return sent, failed
+                failed += len(batch)                           # count failures
+    return sent, failed                                        # return total sent and failed counts
 
 
 def _sendgrid_api_bulk(api_key, recipients, subject, html_body, png_bytes=None, png_filename='flyer.png'):
@@ -616,39 +616,39 @@ def _sendgrid_api_bulk(api_key, recipients, subject, html_body, png_bytes=None, 
         raise RuntimeError('Set SMTP_FROM_EMAIL in environment variables.')
 
     attachment = None
-    if png_bytes:
+    if png_bytes:                                              # if a flyer image was provided, prepare it as a base64-encoded attachment
         attachment = {'content': base64.b64encode(png_bytes).decode(),
                       'filename': png_filename, 'type': 'image/png',
                       'disposition': 'attachment'}
 
-    BATCH = 500
+    BATCH = 500                                                # SendGrid allows up to 1000 BCC recipients per call; we use 500 to stay safe
     sent = failed = 0
-    for i in range(0, len(recipients), BATCH):
-        batch = recipients[i:i + BATCH]
+    for i in range(0, len(recipients), BATCH):                 # loop through all recipients in chunks of 500
+        batch = recipients[i:i + BATCH]                        # get the next batch
         payload = {
             'personalizations': [{
-                'to': [{'email': from_email}],
-                'bcc': [{'email': e} for e in batch],
+                'to': [{'email': from_email}],                 # "To" is the sender (recipients see their own address as BCC)
+                'bcc': [{'email': e} for e in batch],          # actual recipients in BCC so they can't see each other's addresses
             }],
             'from': {'email': from_email, 'name': from_name},
             'subject': subject or '(no subject)',
             'content': [{'type': 'text/html', 'value': html_body}],
         }
         if attachment:
-            payload['attachments'] = [attachment]
+            payload['attachments'] = [attachment]              # add the flyer image attachment if there is one
         try:
             res = requests.post(
                 'https://api.sendgrid.com/v3/mail/send',
                 headers={'Authorization': f'Bearer {api_key}'},
-                json=payload, timeout=60,
+                json=payload, timeout=60,                      # send the batch; wait up to 60 seconds
             )
-            if res.status_code in (200, 202):
+            if res.status_code in (200, 202):                  # success
                 sent += len(batch)
             else:
-                failed += len(batch)
+                failed += len(batch)                           # SendGrid rejected the batch
         except Exception:
-            failed += len(batch)
-    return sent, failed
+            failed += len(batch)                               # network error or timeout
+    return sent, failed                                        # return the total sent and failed counts
 
 
 def _sendgrid_campaign_tracked(api_key, recipients, subject, html_body, send_id):
@@ -660,27 +660,27 @@ def _sendgrid_campaign_tracked(api_key, recipients, subject, html_body, send_id)
     if not from_email:
         raise RuntimeError('Set SMTP_FROM_EMAIL in environment variables.')
 
-    BATCH = 1000
+    BATCH = 1000                                               # SendGrid allows up to 1000 personalizations per API call
     sent = failed = 0
-    for i in range(0, len(recipients), BATCH):
+    for i in range(0, len(recipients), BATCH):                 # send in batches of 1000
         batch = recipients[i:i + BATCH]
         payload = {
             'personalizations': [
                 {
-                    'to': [{'email': r['email']}],
-                    'custom_args': {
-                        'send_id': str(send_id),
-                        'contact_id': str(r['contact_id']),
+                    'to': [{'email': r['email']}],             # each recipient gets their own "To" line (no BCC here)
+                    'custom_args': {                           # attach tracking data to each email so webhooks can identify who opened/clicked
+                        'send_id': str(send_id),              # the ID of this campaign send
+                        'contact_id': str(r['contact_id']),   # the ID of this specific contact
                     },
                 }
-                for r in batch
+                for r in batch                                 # one personalization object per recipient
             ],
             'from': {'email': from_email, 'name': from_name},
             'subject': subject or '(no subject)',
             'content': [{'type': 'text/html', 'value': html_body}],
             'tracking_settings': {
-                'click_tracking': {'enable': True},
-                'open_tracking': {'enable': True},
+                'click_tracking': {'enable': True},            # track when recipients click links in the email
+                'open_tracking': {'enable': True},             # track when recipients open the email
             },
         }
         try:
@@ -702,132 +702,132 @@ def _enroll_contact_in_sequences(contact_id, stage):
     """Enroll a contact in all active sequences triggered by the given stage,
     skipping if already enrolled and active."""
     from datetime import datetime as _dt, timedelta
-    sequences = EmailSequence.query.filter_by(trigger_stage=stage, is_active=True).all()
-    for seq in sequences:
-        if not seq.steps:
+    sequences = EmailSequence.query.filter_by(trigger_stage=stage, is_active=True).all()  # find all active sequences that trigger on this stage
+    for seq in sequences:                                      # loop through each matching sequence
+        if not seq.steps:                                      # skip sequences with no steps (nothing to send)
             continue
         already = EmailSequenceEnrollment.query.filter_by(
             sequence_id=seq.id, contact_id=contact_id, status='active'
-        ).first()
-        if already:
+        ).first()                                              # check if this contact is already enrolled and active in this sequence
+        if already:                                            # skip if already enrolled (don't double-enroll)
             continue
-        first_step = seq.steps[0]
+        first_step = seq.steps[0]                             # get the first step of the sequence to calculate when to send it
         enrollment = EmailSequenceEnrollment(
             sequence_id=seq.id,
             contact_id=contact_id,
-            next_step_index=0,
-            next_send_at=_dt.utcnow() + timedelta(days=first_step.day_offset),
+            next_step_index=0,                                # start at step 0 (the first step)
+            next_send_at=_dt.utcnow() + timedelta(days=first_step.day_offset),  # schedule the first email based on the step's day offset
             status='active',
         )
-        db.session.add(enrollment)
-    db.session.commit()
+        db.session.add(enrollment)                            # queue the enrollment record to be saved
+    db.session.commit()                                       # save all enrollments at once
 
 
 def _process_sequence_emails(app):
     """Send any sequence emails that are due. Called by the scheduler."""
-    import json as _json, urllib.request as _urlreq
+    import json as _json, urllib.request as _urlreq  # json for building the API payload, urlreq for making HTTP calls
     from datetime import datetime as _dt
-    with app.app_context():
-        now = _dt.utcnow()
+    with app.app_context():                          # run inside the Flask app context so we can access the database
+        now = _dt.utcnow()                           # get the current time (UTC)
         due = EmailSequenceEnrollment.query.filter(
             EmailSequenceEnrollment.status == 'active',
-            EmailSequenceEnrollment.next_send_at <= now,
+            EmailSequenceEnrollment.next_send_at <= now,   # find all enrollments whose next email is due right now or in the past
         ).all()
         sg_key = os.environ.get('SENDGRID_API_KEY') or (
             os.environ.get('SMTP_PASSWORD', '').startswith('SG.') and os.environ.get('SMTP_PASSWORD')
-        ) or None
-        from_email = os.environ.get('MAIL_FROM', os.environ.get('SMTP_USERNAME', ''))
-        for enrollment in due:
+        ) or None                                    # look for a SendGrid key in two places: dedicated env var, or SMTP password starting with "SG."
+        from_email = os.environ.get('MAIL_FROM', os.environ.get('SMTP_USERNAME', ''))  # get the From address
+        for enrollment in due:                       # loop through every overdue enrollment
             seq = enrollment.sequence
-            if not seq.is_active:
+            if not seq.is_active:                    # skip if the sequence was deactivated since this enrollment was created
                 continue
             steps = seq.steps
-            if enrollment.next_step_index >= len(steps):
+            if enrollment.next_step_index >= len(steps):  # if we've run out of steps, mark the enrollment complete
                 enrollment.status = 'completed'
                 db.session.commit()
                 continue
-            step = steps[enrollment.next_step_index]
+            step = steps[enrollment.next_step_index]  # get the current step to send
             contact = enrollment.contact
-            if not contact or not contact.email:
+            if not contact or not contact.email:     # skip contacts with no email address (can't send)
                 enrollment.status = 'cancelled'
                 db.session.commit()
                 continue
             # Send email
-            if sg_key and from_email:
+            if sg_key and from_email:                # only attempt to send if we have a SendGrid key and a from address
                 try:
                     payload = {
                         'personalizations': [{'to': [{'email': contact.email,
                                                        'name': f'{contact.first_name or ""} {contact.last_name or ""}'.strip()}]}],
                         'from': {'email': from_email},
-                        'subject': step.subject,
-                        'content': [{'type': 'text/html', 'value': step.body}],
+                        'subject': step.subject,     # the subject line from this sequence step
+                        'content': [{'type': 'text/html', 'value': step.body}],  # the email body from this step
                     }
                     req = _urlreq.Request(
                         'https://api.sendgrid.com/v3/mail/send',
-                        data=_json.dumps(payload).encode(),
+                        data=_json.dumps(payload).encode(),  # convert the payload dict to JSON bytes
                         headers={'Authorization': f'Bearer {sg_key}', 'Content-Type': 'application/json'},
                         method='POST',
                     )
-                    _urlreq.urlopen(req, timeout=15)
+                    _urlreq.urlopen(req, timeout=15)  # send the request, wait up to 15 seconds
                 except Exception:
-                    continue  # leave next_send_at as-is; retry next run
+                    continue  # leave next_send_at as-is; retry next run (don't advance the step if sending failed)
             # Advance to next step
-            next_idx = enrollment.next_step_index + 1
-            if next_idx >= len(steps):
+            next_idx = enrollment.next_step_index + 1  # move to the next step
+            if next_idx >= len(steps):               # if there are no more steps, mark the enrollment as completed
                 enrollment.status = 'completed'
                 enrollment.next_step_index = next_idx
             else:
-                next_step = steps[next_idx]
+                next_step = steps[next_idx]          # get the next step to calculate when to send it
                 from datetime import timedelta
                 enrollment.next_step_index = next_idx
-                enrollment.next_send_at = now + timedelta(days=next_step.day_offset)
-            db.session.commit()
+                enrollment.next_send_at = now + timedelta(days=next_step.day_offset)  # schedule the next email based on its day offset
+            db.session.commit()                      # save the updated enrollment status
 
 
-_upload_tasks: dict = {}
+_upload_tasks: dict = {}  # in-memory dictionary that tracks the status/progress of background spreadsheet import jobs
 
 
 def _run_import_task(app_obj, task_id, file_bytes, filename, archive_missing):
-    task = _upload_tasks[task_id]
-    with app_obj.app_context():
+    task = _upload_tasks[task_id]                    # get the task status dict for this import job
+    with app_obj.app_context():                      # run inside the Flask app context to access the database
         try:
-            from werkzeug.datastructures import FileStorage
-            fake_f = FileStorage(stream=io.BytesIO(file_bytes), filename=filename)
-            task['progress'] = 10
-            sheets = read_uploaded_file(fake_f)
-            contacts_result = {'inserted': 0, 'updated': 0, 'skipped': 0}
-            orgs_result = {'inserted': 0, 'updated': 0, 'skipped': 0}
-            sheet_list = [(k, v) for k, v in sheets.items() if v is not None and not v.empty]
-            n = max(len(sheet_list), 1)
-            for i, (_, df) in enumerate(sheet_list):
-                task['progress'] = 20 + int((i / n) * 70)
-                if looks_like_contacts_sheet(df):
-                    _import_contacts(df, contacts_result, archive_missing=archive_missing)
-                elif looks_like_orgs_sheet(df):
-                    _import_orgs(df, orgs_result)
-            db.session.commit()
+            from werkzeug.datastructures import FileStorage  # Werkzeug's file wrapper (same type Flask uses for uploads)
+            fake_f = FileStorage(stream=io.BytesIO(file_bytes), filename=filename)  # wrap the raw file bytes so it looks like an uploaded file
+            task['progress'] = 10                    # update progress to 10% (file loaded)
+            sheets = read_uploaded_file(fake_f)      # parse the file into sheets (handles .xlsx, .csv, etc.)
+            contacts_result = {'inserted': 0, 'updated': 0, 'skipped': 0}  # track counts for contacts
+            orgs_result = {'inserted': 0, 'updated': 0, 'skipped': 0}      # track counts for organizations
+            sheet_list = [(k, v) for k, v in sheets.items() if v is not None and not v.empty]  # filter out any empty/None sheets
+            n = max(len(sheet_list), 1)              # number of sheets (at least 1 to avoid division by zero)
+            for i, (_, df) in enumerate(sheet_list):  # loop through each non-empty sheet
+                task['progress'] = 20 + int((i / n) * 70)  # update progress proportionally as each sheet is processed
+                if looks_like_contacts_sheet(df):    # if this sheet looks like a contacts sheet...
+                    _import_contacts(df, contacts_result, archive_missing=archive_missing)  # import it as contacts
+                elif looks_like_orgs_sheet(df):      # if it looks like an organizations sheet...
+                    _import_orgs(df, orgs_result)    # import it as organizations
+            db.session.commit()                      # save all changes to the database
             task['status'] = 'done'
-            task['progress'] = 100
-            task['result'] = {'contacts': contacts_result, 'organizations': orgs_result}
+            task['progress'] = 100                   # import complete
+            task['result'] = {'contacts': contacts_result, 'organizations': orgs_result}  # store the final counts
         except Exception as exc:
-            db.session.rollback()
+            db.session.rollback()                    # if anything went wrong, undo all database changes
             import traceback
             task['status'] = 'error'
             task['error'] = str(exc)
-            task['details'] = traceback.format_exc()
+            task['details'] = traceback.format_exc() # capture the full error details for debugging
 
 
 def create_app(config_class=Config):
-    app = Flask(__name__)
-    app.config.from_object(config_class)
-    db.init_app(app)
-    login_manager.init_app(app)
-    limiter.init_app(app)
+    app = Flask(__name__)                            # create the Flask web application instance
+    app.config.from_object(config_class)            # load settings from the Config class in config.py
+    db.init_app(app)                                # connect the database to the app
+    login_manager.init_app(app)                     # connect the login system to the app
+    limiter.init_app(app)                           # connect the rate limiter to the app
 
-    with app.app_context():
-        db.create_all()
+    with app.app_context():                          # run the setup code inside the app context (required for database access)
+        db.create_all()                              # create all database tables if they don't exist yet
         # Add columns that didn't exist in earlier schema versions
-        for stmt in [
+        for stmt in [                                # list of SQL statements to add new columns to existing tables (safe to run repeatedly)
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_post_social BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notes TEXT",
             "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS pipeline_stage VARCHAR(32)",
@@ -836,32 +836,47 @@ def create_app(config_class=Config):
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP",
             "ALTER TABLE flyer_templates ADD COLUMN background VARCHAR(32) DEFAULT '#ffffff'",
             "ALTER TABLE flyer_templates ADD COLUMN bg_asset_id INTEGER",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_access_proposals BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_access_email_events BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_send_email BOOLEAN NOT NULL DEFAULT FALSE",
         ]:
             try:
-                db.session.execute(db.text(stmt))
+                db.session.execute(db.text(stmt))    # run each ALTER TABLE statement
                 db.session.commit()
             except Exception:
-                db.session.rollback()
-        _bootstrap_admin_user()
+                db.session.rollback()                # if the column already exists, this will fail safely - just roll back and continue
+        _bootstrap_admin_user()                      # create the first admin account from .env if no users exist yet
 
     # Start background scheduler for email sequences
     try:
-        from apscheduler.schedulers.background import BackgroundScheduler
-        _scheduler = BackgroundScheduler(daemon=True)
+        from apscheduler.schedulers.background import BackgroundScheduler  # APScheduler runs tasks on a timer in the background
+        _scheduler = BackgroundScheduler(daemon=True)  # daemon=True means the scheduler stops automatically when the app stops
         _scheduler.add_job(
-            _process_sequence_emails, 'interval', hours=1,
+            _process_sequence_emails, 'interval', hours=1,  # run the email sequence processor every 1 hour
             args=[app], id='seq_emails', replace_existing=True,
         )
-        _scheduler.start()
+        _scheduler.start()                           # start the background scheduler
     except Exception:
-        pass
+        pass                                         # if the scheduler fails to start, the app still works - just no automated sequences
 
-    contact_schema = ContactSchema()
-    contacts_schema = ContactSchema(many=True)
+    contact_schema = ContactSchema()                 # schema for serializing a single contact to JSON
+    contacts_schema = ContactSchema(many=True)       # schema for serializing a list of contacts to JSON
 
     @login_manager.user_loader
     def load_user(user_id):
-        return User.query.get(int(user_id))
+        return User.query.get(int(user_id))          # Flask-Login calls this to look up the current user by their session ID
+
+    def _check_permission(flag):
+        """Return a 403 JSON/redirect if the current user lacks the given permission.
+        Admins always pass. Returns None if access is allowed."""
+        if current_user.is_admin:
+            return None
+        if not getattr(current_user, flag, False):
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'You do not have permission to do that.'}), 403
+            return render_template('login.html',
+                                   error='You do not have permission to access that page.'), 403
+        return None
 
     # Every page and API route requires login except the login page itself
     # and static assets -- gated centrally here instead of decorating each
@@ -869,57 +884,57 @@ def create_app(config_class=Config):
     # accidentally end up unprotected.
     @app.before_request
     def require_login():
-        if request.endpoint in (None, 'login', 'static'):
+        if request.endpoint in (None, 'login', 'static'):  # allow the login page and static files (CSS/JS/images) without login
             return None
-        if not current_user.is_authenticated:
-            if request.path.startswith('/api/'):
+        if not current_user.is_authenticated:               # if the visitor is NOT logged in...
+            if request.path.startswith('/api/'):             # if they're hitting an API endpoint, return a JSON error
                 return jsonify({'error': 'authentication required'}), 401
-            return redirect(url_for('login', next=request.path))
+            return redirect(url_for('login', next=request.path))  # otherwise redirect them to the login page
 
     @app.route('/login', methods=['GET', 'POST'])
-    @limiter.limit("10 per minute", methods=["POST"])
+    @limiter.limit("10 per minute", methods=["POST"])       # allow max 10 login attempts per minute per IP (prevents brute-force guessing)
     def login():
-        if current_user.is_authenticated:
+        if current_user.is_authenticated:                   # if already logged in, skip the login page and go to the main app
             return redirect(url_for('index'))
         error = None
         username = ''
-        if request.method == 'POST':
-            username = (request.form.get('username') or '').strip()
-            password = request.form.get('password') or ''
-            ip = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
-            ua = (request.user_agent.string or '')[:256]
-            user = User.query.filter_by(username=username).first()
+        if request.method == 'POST':                        # if the login form was submitted...
+            username = (request.form.get('username') or '').strip()  # get the submitted username
+            password = request.form.get('password') or ''            # get the submitted password
+            ip = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()  # get the visitor's real IP address (even behind a proxy)
+            ua = (request.user_agent.string or '')[:256]   # get the browser/device identifier (capped to 256 chars)
+            user = User.query.filter_by(username=username).first()  # look up the user by username
 
-            if user and user.is_locked():
-                remaining = int((user.locked_until - datetime.utcnow()).total_seconds() // 60) + 1
+            if user and user.is_locked():                   # if the account is currently locked out from too many failed attempts...
+                remaining = int((user.locked_until - datetime.utcnow()).total_seconds() // 60) + 1  # calculate minutes remaining in the lockout
                 event = LoginEvent(username=username, user_id=user.id, ip_address=ip, user_agent=ua,
-                                   success=False, note='account_locked')
+                                   success=False, note='account_locked')  # log this blocked attempt
                 db.session.add(event)
                 db.session.commit()
                 error = f'Account locked due to too many failed attempts. Try again in {remaining} minute{"s" if remaining != 1 else ""}.'
-            elif user and user.check_password(password):
-                user.reset_login_attempts()
+            elif user and user.check_password(password):    # if the username and password are correct...
+                user.reset_login_attempts()                 # clear the failed attempt counter
                 event = LoginEvent(username=username, user_id=user.id, ip_address=ip, user_agent=ua,
-                                   success=True)
+                                   success=True)            # log the successful login
                 db.session.add(event)
                 db.session.commit()
-                login_user(user, remember=True)
-                next_path = request.args.get('next')
-                return redirect(next_path or url_for('index'))
-            else:
+                login_user(user, remember=True)             # log the user in and remember them across browser sessions
+                next_path = request.args.get('next')        # check if they were trying to visit a specific page before being redirected to login
+                return redirect(next_path or url_for('index'))  # send them where they were going, or to the home page
+            else:                                           # wrong username or password...
                 if user:
-                    user.record_failed_login()
+                    user.record_failed_login()              # increment the failed attempt counter for this user
                 event = LoginEvent(username=username, user_id=user.id if user else None,
                                    ip_address=ip, user_agent=ua, success=False,
-                                   note='bad_password' if user else 'unknown_user')
+                                   note='bad_password' if user else 'unknown_user')  # log the failed attempt
                 db.session.add(event)
                 db.session.commit()
-                if user and user.is_locked():
+                if user and user.is_locked():               # if this failure just triggered a lockout...
                     error = 'Too many failed attempts — account locked for 15 minutes.'
                 else:
-                    attempts_left = max(0, 5 - (user.failed_login_attempts if user else 0))
+                    attempts_left = max(0, 5 - (user.failed_login_attempts if user else 0))  # calculate how many tries remain before lockout
                     error = f'Invalid username or password.{f" {attempts_left} attempt{'s' if attempts_left != 1 else ''} remaining before lockout." if user and attempts_left < 5 else ""}'
-        return render_template('login.html', error=error, username=username)
+        return render_template('login.html', error=error, username=username)  # show the login page (with error message if any)
 
     @app.errorhandler(429)
     def too_many_login_attempts(e):
@@ -927,32 +942,34 @@ def create_app(config_class=Config):
         # revisit this if another route ever gets its own limit.
         return render_template(
             'login.html',
-            error='Too many login attempts. Please wait a minute and try again.',
+            error='Too many login attempts. Please wait a minute and try again.',  # friendly error shown on the login page when rate-limited
             username=''
         ), 429
 
     @app.route('/logout')
     def logout():
-        logout_user()
-        return redirect(url_for('login'))
+        logout_user()                                       # clear the user's login session
+        return redirect(url_for('login'))                   # send them to the login page
 
     @app.route('/')
     def index():
         # Serve single-page frontend
-        return render_template('index.html')
+        return render_template('index.html')                # serve the main application HTML page
 
     @app.route('/profile/<int:contact_id>')
     def profile(contact_id):
-        return render_template('profile.html', contact_id=contact_id)
+        return render_template('profile.html', contact_id=contact_id)  # serve the contact profile page, passing the contact ID to the template
 
     # ── Proposal Manager ──────────────────────────────────────────────── #
 
     @app.route('/proposals')
     @login_required
     def proposals_hub():
-        proposals = Proposal.query.order_by(Proposal.updated_at.desc()).all()
-        cs_count = CaseStudy.query.count()
-        contact_count = Contact.query.count()
+        denied = _check_permission('can_access_proposals')
+        if denied: return denied
+        proposals = Proposal.query.order_by(Proposal.updated_at.desc()).all()  # fetch all proposals, newest first
+        cs_count = CaseStudy.query.count()        # count how many case studies exist (shown on the hub page)
+        contact_count = Contact.query.count()     # count how many contacts exist (shown on the hub page)
         return render_template('proposals_hub.html',
                                proposals=proposals,
                                cs_count=cs_count,
@@ -961,22 +978,22 @@ def create_app(config_class=Config):
     @app.route('/proposals/new')
     @login_required
     def proposal_new():
-        case_studies = CaseStudy.query.order_by(CaseStudy.created_at.desc()).all()
+        case_studies = CaseStudy.query.order_by(CaseStudy.created_at.desc()).all()  # load all case studies to populate the picker
         return render_template('proposal_builder.html',
-                               proposal=None,
+                               proposal=None,             # no existing proposal - this is a blank new one
                                case_studies=case_studies)
 
     @app.route('/proposals/<int:proposal_id>')
     @login_required
     def proposal_detail(proposal_id):
-        proposal = Proposal.query.get_or_404(proposal_id)
-        case_studies = CaseStudy.query.order_by(CaseStudy.created_at.desc()).all()
+        proposal = Proposal.query.get_or_404(proposal_id)  # load the proposal or return a 404 error if not found
+        case_studies = CaseStudy.query.order_by(CaseStudy.created_at.desc()).all()  # load all case studies for the picker
         # Hydrate linked contacts
-        contact_ids = proposal.contact_ids or []
-        contacts = Contact.query.filter(Contact.id.in_(contact_ids)).all() if contact_ids else []
+        contact_ids = proposal.contact_ids or []           # get the list of contact IDs stored on this proposal
+        contacts = Contact.query.filter(Contact.id.in_(contact_ids)).all() if contact_ids else []  # load the actual contact records
         # Hydrate linked case studies
-        cs_ids = proposal.case_study_ids or []
-        linked_cs = CaseStudy.query.filter(CaseStudy.id.in_(cs_ids)).all() if cs_ids else []
+        cs_ids = proposal.case_study_ids or []             # get the list of case study IDs stored on this proposal
+        linked_cs = CaseStudy.query.filter(CaseStudy.id.in_(cs_ids)).all() if cs_ids else []  # load the actual case study records
         return render_template('proposal_builder.html',
                                proposal=proposal,
                                case_studies=case_studies,
@@ -986,10 +1003,10 @@ def create_app(config_class=Config):
     @app.route('/proposals/list')
     @login_required
     def proposals_list():
-        status_filter = request.args.get('status', '')
-        q = Proposal.query.order_by(Proposal.updated_at.desc())
+        status_filter = request.args.get('status', '')     # optional ?status= filter in the URL
+        q = Proposal.query.order_by(Proposal.updated_at.desc())  # start with all proposals, newest first
         if status_filter:
-            q = q.filter(Proposal.status == status_filter)
+            q = q.filter(Proposal.status == status_filter)  # filter by status if one was provided
         proposals = q.all()
         return render_template('proposals_list.html',
                                proposals=proposals,
@@ -998,17 +1015,17 @@ def create_app(config_class=Config):
     @app.route('/api/proposals', methods=['GET'])
     @login_required
     def list_proposals():
-        per_page = request.args.get('per_page', 50, type=int)
-        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 50, type=int)  # how many results to return per page (default 50)
+        page = request.args.get('page', 1, type=int)            # which page of results to return (default 1)
         q = Proposal.query.order_by(Proposal.updated_at.desc())
-        total = q.count()
-        items = q.offset((page - 1) * per_page).limit(per_page).all()
+        total = q.count()                                       # total number of proposals (for pagination)
+        items = q.offset((page - 1) * per_page).limit(per_page).all()  # get just this page's records
         return jsonify({'proposals': [p.to_dict() for p in items], 'total': total, 'per_page': per_page})
 
     @app.route('/api/case-studies-count')
     @login_required
     def case_studies_count():
-        return jsonify({'count': CaseStudy.query.count()})
+        return jsonify({'count': CaseStudy.query.count()})  # return the number of case studies as JSON (used by the UI)
 
     @app.route('/api/proposals', methods=['POST'])
     @login_required
@@ -1557,7 +1574,15 @@ def create_app(config_class=Config):
             return jsonify({'error': 'password must be at least 8 characters'}), 400
         if User.query.filter_by(username=username).first():
             return jsonify({'error': 'that username is already taken'}), 409
-        user = User(username=username, display_name=display_name, is_admin=is_admin)
+        user = User(
+            username=username,
+            display_name=display_name,
+            is_admin=is_admin,
+            can_access_proposals=bool(data.get('can_access_proposals')),
+            can_access_email_events=bool(data.get('can_access_email_events')),
+            can_send_email=bool(data.get('can_send_email')),
+            can_post_social=bool(data.get('can_post_social')),
+        )
         user.set_password(password)
         db.session.add(user)
         db.session.commit()
@@ -1591,6 +1616,22 @@ def create_app(config_class=Config):
         log_audit('social_permission_changed', 'user', user.id, user.username,
                   {'can_post_social': user.can_post_social})
         return jsonify({'ok': True, 'can_post_social': user.can_post_social})
+
+    @app.route('/api/users/<int:user_id>/permissions', methods=['POST'])
+    @login_required
+    def update_user_permissions(user_id):
+        if not current_user.is_admin:
+            return jsonify({'error': 'admin only'}), 403
+        user = User.query.get_or_404(user_id)
+        if user.is_admin:
+            return jsonify({'error': 'Admin accounts have full access — permissions are not individually adjustable.'}), 400
+        data = request.get_json(force=True) or {}
+        _flags = ['can_access_proposals', 'can_access_email_events', 'can_send_email', 'can_post_social']
+        for flag in _flags:
+            if flag in data:
+                setattr(user, flag, bool(data[flag]))
+        db.session.commit()
+        return jsonify(user.to_dict())
 
     def _case_study_fields(data):
         return {
@@ -1703,6 +1744,8 @@ def create_app(config_class=Config):
     @app.route('/email-events')
     @login_required
     def email_events_hub():
+        denied = _check_permission('can_access_email_events')
+        if denied: return denied
         return render_template('email_events_hub.html')
 
     @app.route('/email-builder')
@@ -1787,10 +1830,13 @@ def create_app(config_class=Config):
         return jsonify(dup.to_dict()), 201
 
     @app.route('/api/email-templates/<int:template_id>/send-bulk', methods=['POST'])
+    @login_required
     def send_email_template_bulk(template_id):
         """Send the email template to a filtered group of contacts.
         Merge tags ({{first_name}} etc.) are replaced per-contact.
         Only contacts with a non-empty email address receive the email."""
+        denied = _check_permission('can_send_email')
+        if denied: return denied
         import re as _re
         t = EmailTemplate.query.get_or_404(template_id)
         data = request.get_json(force=True) or {}
@@ -1849,6 +1895,8 @@ def create_app(config_class=Config):
 
     @app.route('/api/email-templates/<int:template_id>/send', methods=['POST'])
     def send_email_template(template_id):
+        denied = _check_permission('can_send_email')
+        if denied: return denied
         """Sends the current compose content to one typed-in address --
         a quick send/test capability, not the bulk "send to my filtered
         contact list" feature (that needs batching, an unsubscribe
@@ -2774,18 +2822,114 @@ def create_app(config_class=Config):
         draft = response.choices[0].message.content
         return jsonify({'draft': draft, 'recipient_count': len(rows)})
 
+    @app.route('/api/flyer-bg-preview')
+    def flyer_bg_preview():
+        """Returns a small PNG thumbnail of a background style + color combination."""
+        from PIL import Image, ImageDraw
+        style  = request.args.get('style', 'diagonal')
+        color  = request.args.get('color', 'maroon')
+        w, h   = 160, 200
+        _palettes = {
+            'maroon':   {'top': (80, 10, 18),   'bottom': (18, 6, 8),    'accent': (160, 130, 70)},
+            'burgundy': {'top': (90, 20, 48),   'bottom': (25, 3, 15),   'accent': (200, 150, 100)},
+            'navy':     {'top': (10, 25, 80),   'bottom': (5, 5, 30),    'accent': (100, 160, 220)},
+            'royal':    {'top': (26, 10, 110),  'bottom': (8, 3, 24),    'accent': (160, 126, 230)},
+            'forest':   {'top': (15, 60, 30),   'bottom': (5, 18, 10),   'accent': (120, 180, 80)},
+            'teal':     {'top': (10, 74, 70),   'bottom': (2, 20, 18),   'accent': (80, 200, 180)},
+            'charcoal': {'top': (50, 50, 55),   'bottom': (15, 15, 18),  'accent': (180, 160, 120)},
+            'slate':    {'top': (30, 46, 70),   'bottom': (8, 14, 24),   'accent': (100, 150, 200)},
+            'copper':   {'top': (90, 40, 16),   'bottom': (30, 10, 4),   'accent': (200, 120, 70)},
+            'plum':     {'top': (70, 16, 60),   'bottom': (20, 4, 16),   'accent': (200, 120, 180)},
+        }
+        palette     = _palettes.get(color, _palettes['maroon'])
+        color_top   = palette['top']
+        color_bot   = palette['bottom']
+        color_acc   = palette['accent']
+        img = Image.new('RGB', (w, h))
+        px  = img.load()
+        drw = ImageDraw.Draw(img, 'RGBA')
+
+        if style == 'radial':
+            cx, cy = w // 2, h // 2
+            mx = ((cx**2 + cy**2) ** 0.5)
+            for y in range(h):
+                for x in range(w):
+                    t = min(((x-cx)**2+(y-cy)**2)**0.5 / mx, 1.0)
+                    px[x,y] = tuple(int(color_top[i]+(color_bot[i]-color_top[i])*t) for i in range(3))
+            for r in range(int(min(w,h)*0.45), int(min(w,h)*0.30), -1):
+                a = int(25*(r-min(w,h)*0.30)/(min(w,h)*0.15))
+                drw.ellipse([cx-r,cy-r,cx+r,cy+r], outline=(*color_acc, max(0,a)), width=1)
+
+        elif style == 'split':
+            for y in range(h):
+                for x in range(w):
+                    px[x,y] = color_top if (x/w + y/h) < 1.0 else color_bot
+            drw.line([(0,h),(w,0)], fill=(*color_acc,140), width=3)
+            drw.ellipse([int(w*0.5),int(-h*0.1),int(w*1.15),int(h*0.5)], fill=(*color_acc,25))
+
+        elif style == 'geometric':
+            for y in range(h):
+                for x in range(w):
+                    px[x,y] = color_bot
+            drw.polygon([(0,0),(int(w*0.65),0),(0,int(h*0.55))], fill=color_top)
+            drw.rectangle([0,int(h*0.52),w,int(h*0.57)], fill=(*color_acc,190))
+            for i in range(5):
+                ox = int(w*0.62)+i*14
+                drw.line([(ox,0),(ox+int(h*0.6),int(h*0.6))], fill=(*color_acc,50), width=2)
+
+        elif style == 'horizontal':
+            band = h // 3
+            cols = [color_bot, color_top, color_bot]
+            for y in range(h):
+                c = cols[min(y//band,2)]
+                for x in range(w):
+                    px[x,y] = c
+            drw.rectangle([0,band-2,w,band+2], fill=(*color_acc,210))
+            drw.rectangle([0,band*2-2,w,band*2+2], fill=(*color_acc,210))
+            for dy in range(band+12, band*2, 18):
+                for dx in range(10, w, 18):
+                    drw.ellipse([dx-2,dy-2,dx+2,dy+2], fill=(*color_acc,70))
+
+        elif style == 'corner':
+            for y in range(h):
+                for x in range(w):
+                    px[x,y] = color_bot
+            rb = int(min(w,h)*0.85)
+            drw.ellipse([w-rb,h-rb,w+rb,h+rb], fill=color_top)
+            rm = int(min(w,h)*0.50)
+            drw.ellipse([w-rm,h-rm,w+rm,h+rm], fill=(*color_acc,40))
+            rs = int(min(w,h)*0.62)
+            drw.ellipse([w-rs,h-rs,w+rs,h+rs], outline=(*color_acc,90), width=2)
+
+        else:  # diagonal
+            for y in range(h):
+                for x in range(w):
+                    t = x/w*0.35 + y/h*0.65
+                    px[x,y] = tuple(int(color_top[i]+(color_bot[i]-color_top[i])*t) for i in range(3))
+            cx2, cy2 = int(w*0.82), int(h*0.18)
+            for r in range(int(min(w,h)*0.40), int(min(w,h)*0.28), -1):
+                a = int(22*(r-min(w,h)*0.28)/(min(w,h)*0.12))
+                drw.ellipse([cx2-r,cy2-r,cx2+r,cy2+r], outline=(*color_acc, max(0,a)), width=1)
+
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        return send_file(buf, mimetype='image/png')
+
     @app.route('/api/generate-flyer', methods=['POST'])
     def generate_flyer():
         import json
         import base64
         from groq import Groq
-        import urllib.request as _urlreq
-        import urllib.parse as _urlparse
         from PIL import Image, ImageDraw, ImageFont
 
         data = request.get_json(silent=True) or {}
         prompt = (data.get('prompt') or '').strip()
         fmt = data.get('format') if data.get('format') in _valid_flyer_formats() else 'square'
+        color_scheme  = data.get('color_scheme', 'maroon')
+        bg_style      = data.get('bg_style', 'diagonal')
+        logo_position = data.get('logo_position', 'top-left')
+        text_layout   = data.get('text_layout', 'bottom-banner')
         if not prompt:
             return jsonify({'error': 'Describe what the post or flyer is about.'}), 400
 
@@ -2794,6 +2938,21 @@ def create_app(config_class=Config):
             return jsonify({'error': 'GROQ_API_KEY is not configured on the server.'}), 500
 
         width, height = (1024, 1536) if fmt == 'portrait' else (1024, 1024)
+
+        # Color palette definitions: each scheme has a top color, bottom color, and accent
+        _palettes = {
+            'maroon':   {'top': (80, 10, 18),   'bottom': (18, 6, 8),    'accent': (160, 130, 70)},
+            'burgundy': {'top': (90, 20, 48),   'bottom': (25, 3, 15),   'accent': (200, 150, 100)},
+            'navy':     {'top': (10, 25, 80),   'bottom': (5, 5, 30),    'accent': (100, 160, 220)},
+            'royal':    {'top': (26, 10, 110),  'bottom': (8, 3, 24),    'accent': (160, 126, 230)},
+            'forest':   {'top': (15, 60, 30),   'bottom': (5, 18, 10),   'accent': (120, 180, 80)},
+            'teal':     {'top': (10, 74, 70),   'bottom': (2, 20, 18),   'accent': (80, 200, 180)},
+            'charcoal': {'top': (50, 50, 55),   'bottom': (15, 15, 18),  'accent': (180, 160, 120)},
+            'slate':    {'top': (30, 46, 70),   'bottom': (8, 14, 24),   'accent': (100, 150, 200)},
+            'copper':   {'top': (90, 40, 16),   'bottom': (30, 10, 4),   'accent': (200, 120, 70)},
+            'plum':     {'top': (70, 16, 60),   'bottom': (20, 4, 16),   'accent': (200, 120, 180)},
+        }
+        palette = _palettes.get(color_scheme, _palettes['maroon'])
 
         copy_system = (
             "You write short marketing copy for a single social media post or printed "
@@ -2829,28 +2988,121 @@ def create_app(config_class=Config):
             headline = raw_text[:60] or 'JBJ Management'
             body = ''
 
-        visual_prompt = (
-            f"Elegant, classy, business-professional background design for a "
-            f"{'letter flyer' if fmt == 'portrait' else 'social media post'} about: {prompt}. "
-            "Style: premium Canva-inspired corporate template. Soft, harmonious color palette — "
-            "muted maroon, warm ivory, soft grey, subtle gold accents. Smooth gradients, "
-            "gentle geometric shapes or abstract soft bokeh. Sophisticated and polished, "
-            "suitable for a professional management firm. Clean, sharp, high resolution. "
-            "CRITICAL: absolutely no text, no letters, no words, no numbers, no watermarks. "
-            "Pure visual background only."
-        )
-        negative_prompt = "blur, blurry, grainy, noisy, text, words, letters, numbers, watermark, harsh contrast, neon, cartoon, anime, painting, sketch, ugly, low quality, distorted"
-        try:
-            img_url = f"https://image.pollinations.ai/prompt/{_urlparse.quote(visual_prompt)}?width={width}&height={height}&nologo=true&model=flux-pro&negative={_urlparse.quote(negative_prompt)}"
-            req = _urlreq.Request(img_url, headers={'User-Agent': 'JBJContacts/1.0'})
-            with _urlreq.urlopen(req, timeout=60) as resp:
-                img_bytes = resp.read()
-        except Exception as e:
-            return jsonify({'error': f'Image generation error: {e}'}), 502
+        # Build a clean background using the chosen palette and style.
+        # All drawing is done with Pillow — no AI, no network call, no artifacts.
+        color_top    = palette['top']
+        color_bottom = palette['bottom']
+        color_accent = palette['accent']
 
-        base_img = Image.open(io.BytesIO(img_bytes)).convert('RGBA')
-        if base_img.size != (width, height):
-            base_img = base_img.resize((width, height))
+        base_img = Image.new('RGBA', (width, height))
+        px = base_img.load()
+        draw_bg = ImageDraw.Draw(base_img, 'RGBA')
+
+        if bg_style == 'radial':
+            # Spotlight: bright in the center, dark at the edges
+            cx, cy = width // 2, height // 2
+            max_dist = ((cx ** 2 + cy ** 2) ** 0.5)
+            for y in range(height):
+                for x in range(width):
+                    dist = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+                    t = min(dist / max_dist, 1.0)
+                    r = int(color_top[0] + (color_bottom[0] - color_top[0]) * t)
+                    g = int(color_top[1] + (color_bottom[1] - color_top[1]) * t)
+                    b = int(color_top[2] + (color_bottom[2] - color_top[2]) * t)
+                    px[x, y] = (r, g, b, 255)
+            # Soft accent glow ring at center
+            for radius in range(int(min(width, height) * 0.45), int(min(width, height) * 0.35), -1):
+                alpha = int(20 * (radius - min(width, height) * 0.35) / (min(width, height) * 0.10))
+                draw_bg.ellipse([cx - radius, cy - radius, cx + radius, cy + radius],
+                                outline=(*color_accent, max(0, alpha)), width=1)
+
+        elif bg_style == 'split':
+            # Bold diagonal split: top-right is accent-tinted, bottom-left is base dark
+            for y in range(height):
+                for x in range(width):
+                    # Points above the diagonal line use the lighter top color
+                    above = (x / width + y / height) < 1.0
+                    c = color_top if above else color_bottom
+                    px[x, y] = (*c, 255)
+            # Accent line along the split
+            draw_bg.line([(0, height), (width, 0)], fill=(*color_accent, 120), width=6)
+            # Large accent circle in the lighter half
+            draw_bg.ellipse([int(width * 0.55), int(-height * 0.1),
+                             int(width * 1.1), int(height * 0.45)],
+                            fill=(*color_accent, 18))
+
+        elif bg_style == 'geometric':
+            # Solid dark base with overlapping geometric shapes
+            for y in range(height):
+                for x in range(width):
+                    px[x, y] = (*color_bottom, 255)
+            # Large triangle top-left
+            draw_bg.polygon([(0, 0), (int(width * 0.6), 0), (0, int(height * 0.55))],
+                            fill=(*color_top, 255))
+            # Accent rectangle bar
+            draw_bg.rectangle([0, int(height * 0.52), width, int(height * 0.57)],
+                              fill=(*color_accent, 180))
+            # Accent diagonal lines (right side)
+            for i in range(6):
+                ox = int(width * 0.65) + i * 18
+                draw_bg.line([(ox, 0), (ox + int(height * 0.6), int(height * 0.6))],
+                             fill=(*color_accent, 40), width=3)
+
+        elif bg_style == 'horizontal':
+            # Three horizontal bands: dark / slightly lighter / dark
+            band = height // 3
+            colors = [color_bottom, color_top, color_bottom]
+            for y in range(height):
+                c = colors[min(y // band, 2)]
+                for x in range(width):
+                    px[x, y] = (*c, 255)
+            # Accent divider lines between bands
+            draw_bg.rectangle([0, band - 3, width, band + 3], fill=(*color_accent, 200))
+            draw_bg.rectangle([0, band * 2 - 3, width, band * 2 + 3], fill=(*color_accent, 200))
+            # Subtle dot grid in the middle band
+            for dy in range(band + 20, band * 2, 28):
+                for dx in range(20, width, 28):
+                    draw_bg.ellipse([dx - 2, dy - 2, dx + 2, dy + 2],
+                                    fill=(*color_accent, 60))
+
+        elif bg_style == 'corner':
+            # Dark base with a large filled accent quarter-circle in one corner
+            for y in range(height):
+                for x in range(width):
+                    px[x, y] = (*color_bottom, 255)
+            # Large soft accent circle anchored to bottom-right corner
+            r_big = int(min(width, height) * 0.75)
+            draw_bg.ellipse([width - r_big, height - r_big, width + r_big, height + r_big],
+                            fill=(*color_top, 255))
+            # Smaller accent ring
+            r_mid = int(min(width, height) * 0.45)
+            draw_bg.ellipse([width - r_mid, height - r_mid, width + r_mid, height + r_mid],
+                            fill=(*color_accent, 35))
+            # Thin accent outline ring
+            r_sm = int(min(width, height) * 0.55)
+            draw_bg.ellipse([width - r_sm, height - r_sm, width + r_sm, height + r_sm],
+                            outline=(*color_accent, 80), width=3)
+
+        else:  # diagonal (default)
+            # Classic diagonal gradient top-left → bottom-right with circle accents
+            for y in range(height):
+                for x in range(width):
+                    t = (x / width * 0.35 + y / height * 0.65)
+                    r = int(color_top[0] + (color_bottom[0] - color_top[0]) * t)
+                    g = int(color_top[1] + (color_bottom[1] - color_top[1]) * t)
+                    b = int(color_top[2] + (color_bottom[2] - color_top[2]) * t)
+                    px[x, y] = (r, g, b, 255)
+            cx, cy = int(width * 0.82), int(height * 0.18)
+            for radius in range(int(min(width, height) * 0.38), int(min(width, height) * 0.28), -1):
+                alpha = int(18 * (1 - (radius - min(width, height) * 0.28) / (min(width, height) * 0.10)))
+                draw_bg.ellipse([cx - radius, cy - radius, cx + radius, cy + radius],
+                                outline=(*color_accent, max(0, alpha)), width=1)
+            cx2, cy2 = int(width * 0.15), int(height * 0.80)
+            for radius in range(int(min(width, height) * 0.28), int(min(width, height) * 0.18), -1):
+                alpha = int(12 * (1 - (radius - min(width, height) * 0.18) / (min(width, height) * 0.10)))
+                draw_bg.ellipse([cx2 - radius, cy2 - radius, cx2 + radius, cy2 + radius],
+                                outline=(*color_accent, max(0, alpha)), width=1)
+
         raw_buf = io.BytesIO()
         base_img.convert('RGB').save(raw_buf, format='PNG')
         raw_b64 = base64.b64encode(raw_buf.getvalue()).decode('ascii')
@@ -2869,7 +3121,6 @@ def create_app(config_class=Config):
             pass
 
         margin = 60
-        max_width = width - margin * 2
 
         def wrap_text(text, font, max_w):
             lines, cur = [], ''
@@ -2885,33 +3136,93 @@ def create_app(config_class=Config):
                 lines.append(cur)
             return lines
 
-        headline_lines = wrap_text(headline, headline_font, max_width)
-        body_lines = wrap_text(body, body_font, max_width) if body else []
+        # ── Text layout ──────────────────────────────────────────────────
         line_gap = 10
-        headline_h = len(headline_lines) * (headline_font.size + line_gap)
-        body_h = len(body_lines) * (body_font.size + 8) if body_lines else 0
-        band_height = min(height, headline_h + body_h + 80)
-        band_top = height - band_height
+        if text_layout == 'centered':
+            # Text block centered vertically and horizontally on the image
+            max_width = width - margin * 2
+            headline_lines = wrap_text(headline, headline_font, max_width)
+            body_lines = wrap_text(body, body_font, max_width) if body else []
+            headline_h = len(headline_lines) * (headline_font.size + line_gap)
+            body_h = len(body_lines) * (body_font.size + 8) if body_lines else 0
+            total_h = headline_h + (16 if body_lines else 0) + body_h
+            # Semi-transparent dark panel behind the text for readability
+            pad = 30
+            panel_top = height // 2 - total_h // 2 - pad
+            panel_bot = height // 2 + total_h // 2 + pad
+            draw.rectangle([margin - pad, panel_top, width - margin + pad, panel_bot], fill=(0, 0, 0, 160))
+            y = panel_top + pad
+            for line in headline_lines:
+                x = (width - draw.textlength(line, font=headline_font)) // 2
+                draw.text((x, y), line, font=headline_font, fill=(255, 255, 255, 255))
+                y += headline_font.size + line_gap
+            y += 8
+            for line in body_lines:
+                x = (width - draw.textlength(line, font=body_font)) // 2
+                draw.text((x, y), line, font=body_font, fill=(230, 230, 230, 255))
+                y += body_font.size + 8
 
-        draw.rectangle([0, band_top, width, height], fill=(20, 0, 2, 175))
+        elif text_layout == 'left-panel':
+            # Vertical semi-transparent panel on the left third of the image
+            panel_w = int(width * 0.42)
+            draw.rectangle([0, 0, panel_w, height], fill=(0, 0, 0, 180))
+            max_width = panel_w - margin - 20
+            headline_lines = wrap_text(headline, headline_font, max_width)
+            body_lines = wrap_text(body, body_font, max_width) if body else []
+            headline_h = len(headline_lines) * (headline_font.size + line_gap)
+            body_h = len(body_lines) * (body_font.size + 8) if body_lines else 0
+            total_h = headline_h + (16 if body_lines else 0) + body_h
+            y = (height - total_h) // 2
+            for line in headline_lines:
+                draw.text((margin, y), line, font=headline_font, fill=(255, 255, 255, 255))
+                y += headline_font.size + line_gap
+            y += 8
+            for line in body_lines:
+                draw.text((margin, y), line, font=body_font, fill=(230, 230, 230, 255))
+                y += body_font.size + 8
 
-        y = band_top + 36
-        for line in headline_lines:
-            draw.text((margin, y), line, font=headline_font, fill=(255, 255, 255, 255))
-            y += headline_font.size + line_gap
-        y += 8
-        for line in body_lines:
-            draw.text((margin, y), line, font=body_font, fill=(240, 240, 240, 255))
-            y += body_font.size + 8
+        else:  # bottom-banner (default)
+            max_width = width - margin * 2
+            headline_lines = wrap_text(headline, headline_font, max_width)
+            body_lines = wrap_text(body, body_font, max_width) if body else []
+            headline_h = len(headline_lines) * (headline_font.size + line_gap)
+            body_h = len(body_lines) * (body_font.size + 8) if body_lines else 0
+            band_height = min(height, headline_h + body_h + 80)
+            band_top = height - band_height
+            draw.rectangle([0, band_top, width, height], fill=(0, 0, 0, 175))
+            y = band_top + 36
+            for line in headline_lines:
+                draw.text((margin, y), line, font=headline_font, fill=(255, 255, 255, 255))
+                y += headline_font.size + line_gap
+            y += 8
+            for line in body_lines:
+                draw.text((margin, y), line, font=body_font, fill=(240, 240, 240, 255))
+                y += body_font.size + 8
 
-        # Paste JBJ logo in top-left corner
+        # ── Logo placement ───────────────────────────────────────────────
         logo_path = os.path.join(os.path.dirname(__file__), 'static', 'img', 'logo.png')
         try:
             logo = Image.open(logo_path).convert('RGBA')
             logo_max_w = int(width * 0.28)
             logo_ratio = logo_max_w / logo.width
-            logo = logo.resize((logo_max_w, int(logo.height * logo_ratio)), Image.LANCZOS)
-            overlay.paste(logo, (margin, margin), logo)
+            logo_w = logo_max_w
+            logo_h = int(logo.height * logo_ratio)
+            logo = logo.resize((logo_w, logo_h), Image.LANCZOS)
+            # Recolor all visible logo pixels to white so it shows clearly on dark backgrounds
+            r, g, b, a = logo.split()
+            white_logo = Image.merge('RGBA', (
+                a.point(lambda x: 255 if x > 0 else 0),  # R channel = 255 where visible
+                a.point(lambda x: 255 if x > 0 else 0),  # G channel = 255 where visible
+                a.point(lambda x: 255 if x > 0 else 0),  # B channel = 255 where visible
+                a,                                         # keep original alpha (transparency)
+            ))
+            if logo_position == 'top-center':
+                logo_x = (width - logo_w) // 2
+            elif logo_position == 'top-right':
+                logo_x = width - logo_w - margin
+            else:  # top-left (default)
+                logo_x = margin
+            overlay.paste(white_logo, (logo_x, margin), white_logo)
         except Exception:
             pass
 
@@ -2970,7 +3281,10 @@ def create_app(config_class=Config):
         return jsonify({'recipient_count': len(contacts), 'sample': sample})
 
     @app.route('/api/campaign/send', methods=['POST'])
+    @login_required
     def campaign_send():
+        denied = _check_permission('can_send_email')
+        if denied: return denied
         data    = request.get_json() or {}
         subject = (data.get('subject') or '').strip()
         body    = (data.get('body') or '').strip()

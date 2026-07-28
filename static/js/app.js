@@ -1778,6 +1778,40 @@ function bindCreateFlyer(){
   const modal = el('createFlyerModal')
   if(!btn || !modal) return
 
+  // Style tile selection
+  function initFlyerStyleTiles(){
+    const tiles = document.querySelectorAll('.flyer-style-tile')
+    tiles.forEach(tile => {
+      tile.addEventListener('click', ()=>{
+        tiles.forEach(t => t.classList.remove('selected'))
+        tile.classList.add('selected')
+        el('flyerBgStyle').value = tile.dataset.style
+      })
+    })
+    if(tiles.length) tiles[0].classList.add('selected')
+  }
+  initFlyerStyleTiles()
+
+  // Color tile selection — updates hidden input and reloads style previews
+  function initFlyerColorTiles(){
+    const tiles = document.querySelectorAll('.flyer-color-tile')
+    tiles.forEach(tile => {
+      tile.addEventListener('click', ()=>{
+        tiles.forEach(t => t.classList.remove('selected'))
+        tile.classList.add('selected')
+        const color = tile.dataset.color
+        el('flyerColorScheme').value = color
+        // Reload style preview thumbnails with the new color
+        const ts = Date.now()
+        document.querySelectorAll('.flyer-style-tile img').forEach(img => {
+          img.src = `/api/flyer-bg-preview?style=${img.dataset.style}&color=${color}&t=${ts}`
+        })
+      })
+    })
+    if(tiles.length) tiles[0].classList.add('selected')
+  }
+  initFlyerColorTiles()
+
   btn.addEventListener('click', ()=>{
     el('createFlyerPrompt').value = ''
     el('createFlyerOutput').style.display = 'none'
@@ -1795,9 +1829,13 @@ function bindCreateFlyer(){
     const prompt = el('createFlyerPrompt').value.trim()
     if(!prompt){ el('createFlyerStatus').textContent = 'Describe what the post or flyer is about.'; return }
     const format = document.querySelector('input[name="flyerFormat"]:checked').value
+    const color_scheme = el('flyerColorScheme') ? el('flyerColorScheme').value : 'maroon'
+    const bg_style = el('flyerBgStyle') ? el('flyerBgStyle').value : 'diagonal'
+    const logo_position = el('flyerLogoPosition') ? el('flyerLogoPosition').value : 'top-left'
+    const text_layout = el('flyerTextLayout') ? el('flyerTextLayout').value : 'bottom-banner'
     const genBtn = el('createFlyerGenerateBtn')
     genBtn.disabled = true
-    el('createFlyerStatus').textContent = 'Generating… this can take up to a minute.'
+    el('createFlyerStatus').textContent = 'Generating…'
     el('createFlyerOutput').style.display = 'none'
     el('createFlyerDownloadBtn').style.display = 'none'
     if(el('createFlyerOpenBuilderBtn')) el('createFlyerOpenBuilderBtn').style.display = 'none'
@@ -1805,7 +1843,7 @@ function bindCreateFlyer(){
       const res = await fetch('/api/generate-flyer', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ prompt, format })
+        body: JSON.stringify({ prompt, format, color_scheme, bg_style, logo_position, text_layout })
       })
       const j = await res.json()
       if(!res.ok){ el('createFlyerStatus').textContent = j.error || 'Could not generate the image.'; return }

@@ -487,11 +487,79 @@
         <h3 id="createFlyerTitle">Create Flyer/Post</h3>
         <label for="createFlyerPrompt">What's it about?</label>
         <textarea id="createFlyerPrompt" rows="3" placeholder="e.g. Announcing our new community outreach office in Dallas"></textarea>
+
         <label style="margin-top:10px;display:block;">Format</label>
         <div class="flyer-format-toggle" style="display:flex;gap:8px;">
           <label class="btn"><input type="radio" name="flyerFormat" value="square" checked style="margin-right:6px;">Social post (square)</label>
           <label class="btn"><input type="radio" name="flyerFormat" value="portrait" style="margin-right:6px;">Flyer (portrait)</label>
         </div>
+
+        <input type="hidden" id="flyerColorScheme" value="maroon">
+        <label style="margin-top:10px;display:block;margin-bottom:6px;">Color Scheme</label>
+        <div id="flyerColorGrid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px;">
+          {% for c in [
+            ('maroon',   '#501012', '#120608', '#a08246', 'Maroon'),
+            ('burgundy', '#5a1430', '#19030f', '#c89664', 'Burgundy'),
+            ('navy',     '#0a1950', '#05051e', '#64a0dc', 'Navy'),
+            ('royal',    '#1a0a6e', '#080318', '#a07ee6', 'Royal'),
+            ('forest',   '#0f3c1e', '#05120a', '#78b450', 'Forest'),
+            ('teal',     '#0a4a46', '#021412', '#50c8b4', 'Teal'),
+            ('charcoal', '#323237', '#0f0f12', '#b4a078', 'Charcoal'),
+            ('slate',    '#1e2e46', '#080e18', '#6496c8', 'Slate'),
+            ('copper',   '#5a2810', '#1e0a04', '#c87846', 'Copper'),
+            ('plum',     '#46103c', '#140410', '#c878b4', 'Plum'),
+          ] %}
+          <div class="flyer-color-tile" data-color="{{ c[0] }}"
+               title="{{ c[4] }}"
+               style="cursor:pointer;border-radius:8px;overflow:hidden;border:3px solid transparent;transition:border-color .15s;">
+            <div style="height:48px;background:linear-gradient(135deg,{{ c[1] }},{{ c[2] }});position:relative;">
+              <div style="position:absolute;bottom:4px;right:4px;width:10px;height:10px;border-radius:50%;background:{{ c[3] }};"></div>
+            </div>
+            <div style="text-align:center;font-size:10px;padding:2px 0;color:#555;">{{ c[4] }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        <style>
+          .flyer-color-tile.selected { border-color: #7b1c2e !important; }
+          .flyer-color-tile:hover { border-color: #ccc; }
+        </style>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:140px;">
+            <label for="flyerLogoPosition" style="display:block;margin-bottom:4px;">Logo Position</label>
+            <select id="flyerLogoPosition" class="form-control" style="width:100%;">
+              <option value="top-left">Top Left</option>
+              <option value="top-center">Top Center</option>
+              <option value="top-right">Top Right</option>
+            </select>
+          </div>
+          <div style="flex:1;min-width:140px;">
+            <label for="flyerTextLayout" style="display:block;margin-bottom:4px;">Text Layout</label>
+            <select id="flyerTextLayout" class="form-control" style="width:100%;">
+              <option value="bottom-banner">Bottom Banner</option>
+              <option value="centered">Centered Overlay</option>
+              <option value="left-panel">Left Side Panel</option>
+            </select>
+          </div>
+        </div>
+
+        <label style="margin-top:12px;display:block;margin-bottom:6px;">Background Style</label>
+        <input type="hidden" id="flyerBgStyle" value="diagonal">
+        <div id="flyerStyleGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+          {% for style, label in [('diagonal','Diagonal'),('radial','Spotlight'),('split','Bold Split'),('geometric','Geometric'),('horizontal','Bands'),('corner','Corner')] %}
+          <div class="flyer-style-tile" data-style="{{ style }}"
+               style="cursor:pointer;border-radius:8px;overflow:hidden;border:3px solid transparent;transition:border-color .15s;">
+            <img src="/api/flyer-bg-preview?style={{ style }}&color=maroon"
+                 data-style="{{ style }}"
+                 style="width:100%;display:block;border-radius:5px;" alt="{{ label }}">
+            <div style="text-align:center;font-size:11px;padding:3px 0;color:#555;">{{ label }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        <style>
+          .flyer-style-tile.selected { border-color: #7b1c2e !important; }
+          .flyer-style-tile:hover { border-color: #ccc; }
+        </style>
+
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
           <button id="createFlyerGenerateBtn" class="btn btn-primary">Generate</button>
           <a id="createFlyerDownloadBtn" class="btn" download="flyer.png" style="display:none;">Download Image</a>
