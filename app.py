@@ -275,6 +275,93 @@ def _bootstrap_admin_user():
     db.session.commit()           # save the new admin account to the database
 
 
+_CIVIC_ORGS = [
+    # (tag, name, description)
+    ("Dallas Civic", "Dallas Friday Group", "Public membership and programs featuring business, political and civic leaders."),
+    ("Dallas Civic", "Dallas Regional Chamber", "Membership organization with public events, policy programs and networking opportunities."),
+    ("Dallas Civic", "North Dallas Chamber of Commerce", "Open membership and public-facing business and policy events."),
+    ("Dallas Civic", "League of Women Voters of Dallas", "Open membership, voter education, public forums and volunteer opportunities."),
+    ("Dallas Civic", "Greater Dallas Planning Council", "Public membership and programs concerning planning, development, transportation and housing."),
+    ("Dallas Civic", "World Affairs Council of Dallas/Fort Worth", "Public membership, speaker programs and community events."),
+    ("Dallas Civic", "Dallas Bar Association", "Primarily attorney membership, but provides public programs, legal education and community service."),
+    ("Dallas Civic", "Rotary Club of Dallas", "Membership-based civic service organization with meetings, speakers and volunteer activities."),
+    ("Dallas Civic", "Dallas County Young Democrats", "Open political participation, meetings and community events."),
+    ("Dallas Civic", "Dallas County Republican Party Clubs", "Open political meetings, volunteer opportunities and public events."),
+    ("Civil Rights & Advocacy", "NAACP Dallas Branch", "Public membership, meetings, advocacy campaigns and community programs."),
+    ("Civil Rights & Advocacy", "Dallas–Fort Worth Urban League", "Public programs centered on economic opportunity, education, employment and civil rights."),
+    ("Civil Rights & Advocacy", "DFW Urban League Young Professionals", "Open to young professionals interested in civic engagement, service and leadership."),
+    ("Civil Rights & Advocacy", "LULAC Dallas-area councils", "Public membership and advocacy involving civil rights, education and economic opportunity."),
+    ("Civil Rights & Advocacy", "Texas Organizing Project", "Open grassroots organizing, public meetings and issue campaigns."),
+    ("Civil Rights & Advocacy", "Faith in Texas", "Public community organizing through congregations and neighborhood partnerships."),
+    ("Civil Rights & Advocacy", "AARP Texas", "Public programs, advocacy initiatives and volunteer opportunities."),
+    ("Civil Rights & Advocacy", "Dallas LGBT Chamber of Commerce", "Open membership, networking, business advocacy and public events."),
+    ("Civil Rights & Advocacy", "Dallas Southern Pride", "Public cultural, community and advocacy events."),
+    ("Civil Rights & Advocacy", "Human Rights Initiative of North Texas", "Public education, volunteer and advocacy opportunities."),
+    ("Civil Rights & Advocacy", "The Senior Source", "Public programs, volunteer opportunities and advocacy for older adults."),
+    ("Business Chambers", "Dallas Black Chamber of Commerce", "Public membership, business programs, advocacy and community events."),
+    ("Business Chambers", "Greater Dallas Hispanic Chamber of Commerce", "Public membership, business development, procurement and community events."),
+    ("Business Chambers", "Greater Dallas Asian American Chamber of Commerce", "Public membership, networking and business-development programs."),
+    ("Business Chambers", "Regional Hispanic Contractors Association", "Public membership, contractor education, procurement events and workforce programs."),
+    ("Business Chambers", "Oak Cliff Chamber of Commerce", "Public membership, committee meetings and economic-development events."),
+    ("Business Chambers", "Greater East Dallas Chamber of Commerce", "Public membership and community-business events."),
+    ("Business Chambers", "Greater Southwest Black Chamber of Commerce", "Public business advocacy and community programming."),
+    ("Business Chambers", "Southeast Dallas Hispanic Chamber of Commerce", "Public membership and community-business programming."),
+    ("Business Chambers", "American Indian Chamber of Commerce of Texas", "Public membership, business development and advocacy."),
+    ("Business Chambers", "Greater Dallas Korean American Chamber of Commerce", "Public business and cultural events."),
+    ("Business Chambers", "Greater Dallas Taiwanese Chamber of Commerce", "Public-facing business and community programs."),
+    ("Business Chambers", "Greater Dallas Vietnamese American Chamber of Commerce", "Public membership and business programs."),
+    ("Development & Transportation", "The Real Estate Council", "Public membership and ticketed events addressing development, housing and public policy."),
+    ("Development & Transportation", "Downtown Dallas, Inc.", "Public events, community meetings, volunteer activities and downtown programs."),
+    ("Development & Transportation", "Better Block Foundation", "Public workshops and neighborhood placemaking projects."),
+    ("Development & Transportation", "Preservation Dallas", "Open membership, tours, advocacy and educational programs."),
+    ("Development & Transportation", "The Loop Dallas", "Public events and community engagement around trails and mobility."),
+    ("Development & Transportation", "Deep Ellum Foundation", "Public neighborhood, cultural and business events."),
+    ("Development & Transportation", "Uptown Dallas, Inc.", "Public events and neighborhood programming."),
+    ("Development & Transportation", "Oak Lawn Committee", "Public-facing land-use and development discussions; meeting participation may have specific rules."),
+    ("Development & Transportation", "Cedars Neighborhood Association", "Community meetings and neighborhood events."),
+    ("Development & Transportation", "Oak Cliff Gateway", "Community and development engagement in North Oak Cliff."),
+    ("Development & Transportation", "Dallas Neighborhood Coalition", "Neighborhood advocacy and public civic participation."),
+    ("Development & Transportation", "Housing Forward", "Public education, volunteer engagement and regional housing initiatives."),
+    ("Development & Transportation", "Dallas Area Habitat for Humanity", "Public volunteering, housing advocacy and neighborhood programs."),
+    ("Development & Transportation", "Fair Park First", "Public meetings, programs and community engagement involving Fair Park."),
+    ("Nonprofit & Community", "United Way of Metropolitan Dallas", "Public volunteer opportunities, community programs and ticketed events."),
+    ("Nonprofit & Community", "Communities Foundation of Texas", "Public programs, nonprofit events and North Texas Giving Day participation."),
+    ("Nonprofit & Community", "The Dallas Foundation", "Community programs and public nonprofit initiatives."),
+    ("Nonprofit & Community", "Social Venture Partners Dallas", "Membership, volunteer consulting and nonprofit engagement."),
+    ("Nonprofit & Community", "Commit Partnership", "Public education advocacy and community programming."),
+    ("Nonprofit & Community", "Child Poverty Action Lab", "Public policy research and community-engagement opportunities."),
+    ("Nonprofit & Community", "United to Learn", "Open volunteer opportunities supporting Dallas ISD schools."),
+    ("Nonprofit & Community", "VolunteerNow", "Public access to volunteer opportunities throughout North Texas."),
+    ("Nonprofit & Community", "North Texas Food Bank", "Public volunteering, community events and advocacy."),
+    ("Nonprofit & Community", "CitySquare", "Public volunteering and community programs addressing poverty and housing."),
+    ("Women's & Cultural", "Junior League of Dallas", "Application-based but publicly open membership, volunteering and community events."),
+    ("Women's & Cultural", "Texas Women's Foundation", "Public events, advocacy programs and community participation."),
+    ("Women's & Cultural", "Dallas Alumnae Chapter of Delta Sigma Theta", "Membership limited to sorority members, but many community programs are public."),
+    ("Women's & Cultural", "Dallas Council of the National Pan-Hellenic Council", "Public community events involving Dallas' historically Black fraternities and sororities."),
+    ("Women's & Cultural", "Dallas Mexican American Historical League", "Open membership, public meetings and cultural programs."),
+    ("Women's & Cultural", "Anita N. Martinez Ballet Folklorico", "Public cultural programs and community events."),
+    ("Women's & Cultural", "Latino Cultural Center", "Public cultural events, exhibitions and community programs."),
+    ("Women's & Cultural", "African American Museum of Dallas", "Public events, lectures and cultural programming."),
+]
+
+
+def _seed_civic_orgs():
+    """Seed Dallas civic/community organizations into OutreachOrg if not already present."""
+    existing = {(o.tag, o.organization) for o in OutreachOrg.query.filter(
+        OutreachOrg.tag.in_([
+            "Dallas Civic", "Civil Rights & Advocacy", "Business Chambers",
+            "Development & Transportation", "Nonprofit & Community", "Women's & Cultural",
+        ])
+    ).all()}
+    added = 0
+    for tag, name, desc in _CIVIC_ORGS:
+        if (tag, name) not in existing:
+            db.session.add(OutreachOrg(tag=tag, organization=name, notes=desc))
+            added += 1
+    if added:
+        db.session.commit()
+
+
 _SHEET_FIELDS = [                        # the list of contact fields that can be updated when syncing from a spreadsheet
     'first_name', 'last_name', 'organization', 'title',
     'phone_office', 'phone_cell', 'phone_personal', 'phone_misc',
@@ -839,6 +926,8 @@ def create_app(config_class=Config):
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_access_proposals BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_access_email_events BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_send_email BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_draft_email BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_export_contacts BOOLEAN NOT NULL DEFAULT FALSE",
         ]:
             try:
                 db.session.execute(db.text(stmt))    # run each ALTER TABLE statement
@@ -846,6 +935,7 @@ def create_app(config_class=Config):
             except Exception:
                 db.session.rollback()                # if the column already exists, this will fail safely - just roll back and continue
         _bootstrap_admin_user()                      # create the first admin account from .env if no users exist yet
+        _seed_civic_orgs()                           # seed Dallas civic orgs into the outreach org table if not already there
 
     # Start background scheduler for email sequences
     try:
@@ -1582,6 +1672,8 @@ def create_app(config_class=Config):
             can_access_email_events=bool(data.get('can_access_email_events')),
             can_send_email=bool(data.get('can_send_email')),
             can_post_social=bool(data.get('can_post_social')),
+            can_draft_email=bool(data.get('can_draft_email')),
+            can_export_contacts=bool(data.get('can_export_contacts')),
         )
         user.set_password(password)
         db.session.add(user)
@@ -1626,7 +1718,7 @@ def create_app(config_class=Config):
         if user.is_admin:
             return jsonify({'error': 'Admin accounts have full access — permissions are not individually adjustable.'}), 400
         data = request.get_json(force=True) or {}
-        _flags = ['can_access_proposals', 'can_access_email_events', 'can_send_email', 'can_post_social']
+        _flags = ['can_access_proposals', 'can_access_email_events', 'can_send_email', 'can_post_social', 'can_draft_email', 'can_export_contacts']
         for flag in _flags:
             if flag in data:
                 setattr(user, flag, bool(data[flag]))
@@ -2365,6 +2457,24 @@ def create_app(config_class=Config):
         db.session.commit()
         return jsonify(a.to_dict()), 201
 
+    @app.route('/community-directory')
+    @login_required
+    def community_directory():
+        civic_tags = [
+            "Dallas Civic", "Civil Rights & Advocacy", "Business Chambers",
+            "Development & Transportation", "Nonprofit & Community", "Women's & Cultural",
+        ]
+        all_orgs = OutreachOrg.query.filter(OutreachOrg.tag.in_(civic_tags)) \
+            .order_by(OutreachOrg.tag, OutreachOrg.organization).all()
+        grouped = {}
+        for tag in civic_tags:
+            grouped[tag] = [o for o in all_orgs if o.tag == tag]
+        return render_template('community_directory.html',
+            grouped=grouped,
+            civic_tags=civic_tags,
+            total=len(all_orgs),
+        )
+
     @app.route('/organizations/<path:org_name>')
     @login_required
     def org_detail_page(org_name):
@@ -2651,7 +2761,10 @@ def create_app(config_class=Config):
         })
 
     @app.route('/api/export', methods=['GET'])
+    @login_required
     def export():
+        denied = _check_permission('can_export_contacts')
+        if denied: return denied
         q = request.args.get('q', type=str)
         tag = parse_multi_param('tag')
         org_tag = parse_multi_param('org_tag')
@@ -2676,7 +2789,10 @@ def create_app(config_class=Config):
         return send_file(io.BytesIO(si.getvalue().encode('utf-8')), mimetype='text/csv', as_attachment=True, download_name='contacts_export.csv')
 
     @app.route('/api/export/emails', methods=['GET'])
+    @login_required
     def export_emails():
+        denied = _check_permission('can_export_contacts')
+        if denied: return denied
         """Flat, de-duplicated list of email addresses for the current filter,
         meant for pasting into the BCC field of a mass email."""
         q = request.args.get('q', type=str)
@@ -2702,7 +2818,10 @@ def create_app(config_class=Config):
         return jsonify({'count': len(emails), 'emails': emails, 'joined': ', '.join(emails)})
 
     @app.route('/api/export/docx', methods=['GET'])
+    @login_required
     def export_docx():
+        denied = _check_permission('can_export_contacts')
+        if denied: return denied
         from docx import Document
 
         q = request.args.get('q', type=str)
@@ -2738,7 +2857,10 @@ def create_app(config_class=Config):
                           as_attachment=True, download_name=f'{safe_name}_export.docx')
 
     @app.route('/api/draft-email', methods=['POST'])
+    @login_required
     def draft_email():
+        denied = _check_permission('can_draft_email')
+        if denied: return denied
         from groq import Groq
 
         data = request.get_json(silent=True) or {}

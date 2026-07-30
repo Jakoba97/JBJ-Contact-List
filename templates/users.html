@@ -91,8 +91,16 @@
 
           <div class="perm-section-label">Actions</div>
           <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <input id="nuDraftEmail" type="checkbox">
+            <span><i class="fas fa-pen-to-square" style="width:16px;color:var(--maroon);"></i> Can draft emails (AI)</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
             <input id="nuSendEmail" type="checkbox">
             <span><i class="fas fa-paper-plane" style="width:16px;color:var(--maroon);"></i> Can send emails &amp; campaigns</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <input id="nuExport" type="checkbox">
+            <span><i class="fas fa-file-arrow-down" style="width:16px;color:var(--maroon);"></i> Can export / download contacts</span>
           </label>
           <label style="display:flex;align-items:center;gap:8px;">
             <input id="nuSocial" type="checkbox">
@@ -116,7 +124,9 @@
             <th>Role</th>
             <th><i class="fas fa-file-contract" title="Proposals"></i> Proposals</th>
             <th><i class="fas fa-envelope-open-text" title="Email &amp; Events"></i> Email &amp; Events</th>
+            <th><i class="fas fa-pen-to-square" title="Draft Emails"></i> Draft Email</th>
             <th><i class="fas fa-paper-plane" title="Send Emails"></i> Send Emails</th>
+            <th><i class="fas fa-file-arrow-down" title="Export Contacts"></i> Export</th>
             <th><i class="fas fa-share-nodes" title="Social Media"></i> Social</th>
             <th>Created</th>
             <th></th>
@@ -135,12 +145,14 @@
               {% endif %}
             </td>
             {% if u.is_admin %}
-              <td colspan="4" style="color:var(--muted);font-size:12px;font-style:italic;">Full access (admin)</td>
+              <td colspan="6" style="color:var(--muted);font-size:12px;font-style:italic;">Full access (admin)</td>
             {% else %}
               {% for flag, val in [
                 ('can_access_proposals', u.can_access_proposals),
                 ('can_access_email_events', u.can_access_email_events),
+                ('can_draft_email', u.can_draft_email),
                 ('can_send_email', u.can_send_email),
+                ('can_export_contacts', u.can_export_contacts),
                 ('can_post_social', u.can_post_social),
               ] %}
               <td>
@@ -258,7 +270,9 @@
         is_admin: nuIsAdmin.checked,
         can_access_proposals: document.getElementById('nuProposals').checked,
         can_access_email_events: document.getElementById('nuEmailEvents').checked,
+        can_draft_email: document.getElementById('nuDraftEmail').checked,
         can_send_email: document.getElementById('nuSendEmail').checked,
+        can_export_contacts: document.getElementById('nuExport').checked,
         can_post_social: document.getElementById('nuSocial').checked,
       };
       const res = await fetch('/api/users', {

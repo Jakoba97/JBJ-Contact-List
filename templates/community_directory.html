@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dallas Community Directory — JBJ Management</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    body { background: #f5f5f7; }
+
+    .cd-header {
+      background: linear-gradient(165deg, var(--maroon) 0%, var(--maroon-dark) 100%);
+      color: #fff;
+      padding: 28px 40px 24px;
+      box-shadow: 0 4px 18px rgba(0,0,0,.18);
+    }
+    .cd-back { color: rgba(255,255,255,.75); text-decoration: none; font-size: 0.83rem; display: inline-flex; align-items: center; gap: 6px; margin-bottom: 14px; }
+    .cd-back:hover { color: #fff; }
+    .cd-title { font-family: var(--font-display); font-size: 1.6rem; font-weight: 400; margin: 0 0 4px; }
+    .cd-subtitle { color: rgba(255,255,255,.75); font-size: 0.88rem; }
+    .cd-stats { display: flex; gap: 28px; margin-top: 18px; }
+    .cd-stat-num { font-size: 1.5rem; font-weight: 700; }
+    .cd-stat-label { font-size: 0.75rem; color: rgba(255,255,255,.65); text-transform: uppercase; letter-spacing: .05em; }
+
+    .cd-controls {
+      background: #fff;
+      border-bottom: 1px solid rgba(148,153,156,.2);
+      padding: 16px 40px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      box-shadow: 0 2px 8px rgba(0,0,0,.06);
+    }
+    .cd-search-wrap { position: relative; flex: 1; min-width: 220px; max-width: 360px; }
+    .cd-search-wrap i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--gray); font-size: 0.85rem; }
+    #cdSearch {
+      width: 100%;
+      border: 1px solid rgba(148,153,156,.35);
+      border-radius: 10px;
+      padding: 9px 12px 9px 34px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      outline: none;
+      background: #f9f9f9;
+    }
+    #cdSearch:focus { border-color: var(--maroon); box-shadow: 0 0 0 3px rgba(173,3,4,.12); background: #fff; }
+
+    .cd-filter-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+    .cd-filter-btn {
+      border: 1px solid rgba(148,153,156,.35);
+      border-radius: 20px;
+      padding: 6px 13px;
+      font-size: 0.78rem;
+      font-family: inherit;
+      background: #f5f5f7;
+      color: var(--charcoal);
+      cursor: pointer;
+      transition: all .15s;
+      font-weight: 500;
+    }
+    .cd-filter-btn:hover { border-color: var(--maroon); color: var(--maroon); }
+    .cd-filter-btn.active { background: var(--maroon); border-color: var(--maroon); color: #fff; }
+
+    .cd-body { padding: 28px 40px; max-width: 1380px; }
+
+    .cd-no-results { text-align: center; padding: 60px 20px; color: var(--gray); display: none; }
+    .cd-no-results i { font-size: 2rem; margin-bottom: 10px; display: block; color: var(--rose); }
+
+    .cd-category { margin-bottom: 44px; }
+    .cd-category-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid var(--maroon);
+    }
+    .cd-category-icon {
+      width: 32px; height: 32px;
+      border-radius: 8px;
+      background: var(--maroon);
+      color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+    .cd-category-name { font-family: var(--font-display); font-size: 1rem; font-weight: 400; color: var(--maroon-dark); }
+    .cd-category-count {
+      margin-left: auto;
+      font-size: 0.78rem;
+      color: var(--gray);
+      background: #f0f0f0;
+      border-radius: 12px;
+      padding: 3px 10px;
+      font-weight: 600;
+    }
+
+    .cd-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .org-card {
+      background: #fff;
+      border: 1px solid rgba(148,153,156,.18);
+      border-top: 3px solid rgba(148,153,156,.2);
+      border-radius: 14px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: var(--card-shadow);
+      transition: transform .15s, box-shadow .15s, border-top-color .15s;
+    }
+    .org-card:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(0,0,0,.11); border-top-color: var(--maroon); }
+    .org-card-name { font-weight: 700; font-size: 0.93rem; color: var(--black); line-height: 1.3; }
+    .org-card-desc { font-size: 0.82rem; color: #555; line-height: 1.55; flex: 1; }
+    .org-card-actions { display: flex; gap: 8px; margin-top: 6px; }
+    .org-card-actions .btn { font-size: 0.78rem; padding: 6px 12px; min-height: 0; border-radius: 8px; }
+
+    /* Add Contact Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.45);
+      z-index: 999;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+      background: #fff;
+      border-radius: 18px;
+      padding: 28px;
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.25);
+      position: relative;
+    }
+    .modal-title { font-family: var(--font-display); font-size: 1.1rem; margin: 0 0 4px; color: var(--maroon-dark); }
+    .modal-org-name { font-size: 0.85rem; color: var(--gray); margin-bottom: 20px; }
+    .modal-close {
+      position: absolute; top: 16px; right: 18px;
+      background: none; border: none; cursor: pointer;
+      font-size: 1.1rem; color: var(--gray);
+    }
+    .modal-close:hover { color: var(--black); }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .form-row.full { grid-template-columns: 1fr; }
+    .form-group { display: flex; flex-direction: column; gap: 4px; }
+    .form-group label { font-size: 0.78rem; font-weight: 600; color: var(--charcoal); text-transform: uppercase; letter-spacing: .04em; }
+    .form-group input {
+      border: 1px solid rgba(148,153,156,.4);
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-size: 0.88rem;
+      font-family: inherit;
+      outline: none;
+    }
+    .form-group input:focus { border-color: var(--maroon); box-shadow: 0 0 0 3px rgba(173,3,4,.12); }
+    .form-group input[readonly] { background: #f5f5f7; color: var(--gray); }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+    .modal-toast { margin-top: 12px; font-size: 0.85rem; color: var(--green); display: none; }
+    .modal-toast.error { color: var(--maroon); }
+
+    @media (max-width: 680px) {
+      .cd-header, .cd-controls, .cd-body { padding-left: 16px; padding-right: 16px; }
+      .cd-title { font-size: 1.25rem; }
+      .cd-grid { grid-template-columns: 1fr; }
+      .form-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="cd-header">
+  <a href="/#search" class="cd-back"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+  <div class="cd-title">Dallas Community Organizations</div>
+  <div class="cd-subtitle">Civic, advocacy, chamber, development, nonprofit, and cultural organizations</div>
+  <div class="cd-stats">
+    <div class="cd-stat">
+      <div class="cd-stat-num">{{ total }}</div>
+      <div class="cd-stat-label">Organizations</div>
+    </div>
+    <div class="cd-stat">
+      <div class="cd-stat-num">{{ grouped|length }}</div>
+      <div class="cd-stat-label">Categories</div>
+    </div>
+  </div>
+</div>
+
+<div class="cd-controls">
+  <div class="cd-search-wrap">
+    <i class="fas fa-search"></i>
+    <input type="text" id="cdSearch" placeholder="Search organizations…" autocomplete="off">
+  </div>
+  <div class="cd-filter-btns">
+    <button class="cd-filter-btn active" data-filter="all">All</button>
+    {% for tag in civic_tags %}
+    <button class="cd-filter-btn" data-filter="{{ tag }}">{{ tag }}</button>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="cd-body">
+  <div class="cd-no-results" id="cdNoResults">
+    <i class="fas fa-search"></i>
+    No organizations match your search.
+  </div>
+
+  {% set cat_icons = {
+    "Dallas Civic": "fa-landmark",
+    "Civil Rights & Advocacy": "fa-fist-raised",
+    "Business Chambers": "fa-briefcase",
+    "Development & Transportation": "fa-city",
+    "Nonprofit & Community": "fa-hands-helping",
+    "Women's & Cultural": "fa-star",
+  } %}
+
+  {% for tag in civic_tags %}
+  {% set orgs = grouped[tag] %}
+  {% if orgs %}
+  <div class="cd-category" data-category="{{ tag }}">
+    <div class="cd-category-header">
+      <div class="cd-category-icon"><i class="fas {{ cat_icons[tag] }}"></i></div>
+      <span class="cd-category-name">{{ tag }}</span>
+      <span class="cd-category-count">{{ orgs|length }}</span>
+    </div>
+    <div class="cd-grid">
+      {% for org in orgs %}
+      <div class="org-card" data-name="{{ org.organization|lower }}" data-desc="{{ (org.notes or '')|lower }}">
+        <div class="org-card-name">{{ org.organization }}</div>
+        {% if org.notes %}
+        <div class="org-card-desc">{{ org.notes }}</div>
+        {% endif %}
+        <div class="org-card-actions">
+          <button class="btn btn-primary btn-sm add-contact-btn"
+            data-org="{{ org.organization }}"
+            data-tag="{{ tag }}">
+            <i class="fas fa-user-plus"></i> Add Contact
+          </button>
+          <a href="/organizations/{{ org.organization|urlencode }}" class="btn btn-sm">
+            <i class="fas fa-arrow-right"></i> View Org
+          </a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {% endfor %}
+</div>
+
+<!-- Add Contact Modal -->
+<div class="modal-overlay" id="addContactModal">
+  <div class="modal-box">
+    <button class="modal-close" id="modalClose"><i class="fas fa-times"></i></button>
+    <div class="modal-title">Add Contact</div>
+    <div class="modal-org-name" id="modalOrgLabel"></div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>First Name</label>
+        <input type="text" id="cfFirst" placeholder="First">
+      </div>
+      <div class="form-group">
+        <label>Last Name</label>
+        <input type="text" id="cfLast" placeholder="Last">
+      </div>
+    </div>
+    <div class="form-row full">
+      <div class="form-group">
+        <label>Title</label>
+        <input type="text" id="cfTitle" placeholder="e.g. Director of Programs">
+      </div>
+    </div>
+    <div class="form-row full">
+      <div class="form-group">
+        <label>Organization</label>
+        <input type="text" id="cfOrg" readonly>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="cfEmail" placeholder="email@example.com">
+      </div>
+      <div class="form-group">
+        <label>Phone</label>
+        <input type="text" id="cfPhone" placeholder="(214) 555-0100">
+      </div>
+    </div>
+    <div class="modal-toast" id="modalToast"></div>
+    <div class="modal-actions">
+      <button class="btn" id="modalCancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="modalSaveBtn"><i class="fas fa-save"></i> Save Contact</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  /* ── Search & filter ── */
+  const searchEl = document.getElementById('cdSearch');
+  const noResults = document.getElementById('cdNoResults');
+  const filterBtns = document.querySelectorAll('.cd-filter-btn');
+  const categories = document.querySelectorAll('.cd-category');
+  let activeFilter = 'all';
+
+  function applyFilters() {
+    const q = searchEl.value.trim().toLowerCase();
+    let anyVisible = false;
+    categories.forEach(catEl => {
+      const catMatch = activeFilter === 'all' || activeFilter === catEl.dataset.category;
+      if (!catMatch) { catEl.style.display = 'none'; return; }
+      const cards = catEl.querySelectorAll('.org-card');
+      let catHasVisible = false;
+      cards.forEach(card => {
+        const show = !q || card.dataset.name.includes(q) || card.dataset.desc.includes(q);
+        card.style.display = show ? '' : 'none';
+        if (show) catHasVisible = true;
+      });
+      catEl.style.display = catHasVisible ? '' : 'none';
+      if (catHasVisible) anyVisible = true;
+    });
+    noResults.style.display = anyVisible ? 'none' : 'block';
+  }
+
+  searchEl.addEventListener('input', applyFilters);
+  filterBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      filterBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeFilter = btn.dataset.filter;
+      applyFilters();
+    });
+  });
+
+  /* ── Add Contact Modal ── */
+  const modal = document.getElementById('addContactModal');
+  const modalOrgLabel = document.getElementById('modalOrgLabel');
+  const cfFirst = document.getElementById('cfFirst');
+  const cfLast = document.getElementById('cfLast');
+  const cfTitle = document.getElementById('cfTitle');
+  const cfOrg = document.getElementById('cfOrg');
+  const cfEmail = document.getElementById('cfEmail');
+  const cfPhone = document.getElementById('cfPhone');
+  const toast = document.getElementById('modalToast');
+  let pendingOrg = '';
+
+  function openModal(orgName, tag) {
+    pendingOrg = orgName;
+    cfOrg.value = orgName;
+    modalOrgLabel.textContent = tag + ' · ' + orgName;
+    [cfFirst, cfLast, cfTitle, cfEmail, cfPhone].forEach(el => el.value = '');
+    toast.style.display = 'none';
+    toast.className = 'modal-toast';
+    modal.classList.add('open');
+    cfFirst.focus();
+  }
+
+  function closeModal() { modal.classList.remove('open'); }
+
+  document.getElementById('modalClose').addEventListener('click', closeModal);
+  document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+
+  document.querySelectorAll('.add-contact-btn').forEach(btn => {
+    btn.addEventListener('click', () => openModal(btn.dataset.org, btn.dataset.tag));
+  });
+
+  async function saveContact(force) {
+    const body = {
+      first_name: cfFirst.value.trim(),
+      last_name: cfLast.value.trim(),
+      title: cfTitle.value.trim(),
+      organization: cfOrg.value.trim(),
+      email: cfEmail.value.trim(),
+      phone_cell: cfPhone.value.trim(),
+    };
+    if (!body.first_name && !body.last_name) {
+      showToast('Please enter at least a first or last name.', true);
+      return;
+    }
+    if (force) body.force_create = true;
+    const res = await fetch('/api/contacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (res.status === 409) {
+      if (data.warning === 'possible_duplicate') {
+        if (confirm(data.message)) saveContact(true);
+      } else {
+        showToast('A contact with that email already exists.', true);
+      }
+      return;
+    }
+    if (!res.ok) { showToast(data.error || 'Something went wrong.', true); return; }
+    showToast('Contact saved! ✔', false);
+    setTimeout(closeModal, 1200);
+  }
+
+  function showToast(msg, isError) {
+    toast.textContent = msg;
+    toast.className = 'modal-toast' + (isError ? ' error' : '');
+    toast.style.display = 'block';
+  }
+
+  document.getElementById('modalSaveBtn').addEventListener('click', () => saveContact(false));
+  [cfFirst, cfLast, cfTitle, cfEmail, cfPhone].forEach(el => {
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') saveContact(false); });
+  });
+})();
+</script>
+
+</body>
+</html>

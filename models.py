@@ -19,6 +19,8 @@ class User(db.Model, UserMixin):
     can_access_proposals = db.Column(db.Boolean, default=False, nullable=False)
     can_access_email_events = db.Column(db.Boolean, default=False, nullable=False)
     can_send_email = db.Column(db.Boolean, default=False, nullable=False)
+    can_draft_email = db.Column(db.Boolean, default=False, nullable=False)
+    can_export_contacts = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     failed_login_attempts = db.Column(db.Integer, default=0, nullable=False)
     locked_until = db.Column(db.DateTime, nullable=True)
@@ -53,6 +55,8 @@ class User(db.Model, UserMixin):
             'can_access_proposals': bool(self.can_access_proposals),
             'can_access_email_events': bool(self.can_access_email_events),
             'can_send_email': bool(self.can_send_email),
+            'can_draft_email': bool(self.can_draft_email),
+            'can_export_contacts': bool(self.can_export_contacts),
         }
 
 

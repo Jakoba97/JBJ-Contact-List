@@ -59,6 +59,7 @@
 
       <li class="toolbar-divider" aria-hidden="true"></li>
 
+      {% if current_user.is_admin or current_user.can_access_email_events %}
       <li>
         <a href="/email-events" class="toolbar-nav-link" title="Email &amp; Events">
           <i class="fas fa-envelope-open-text"></i>
@@ -71,6 +72,8 @@
           <span class="toolbar-label">Flyer Builder</span>
         </a>
       </li>
+      {% endif %}
+      {% if current_user.is_admin or current_user.can_access_proposals %}
       <li>
         <a href="/proposals" class="toolbar-nav-link" title="Proposal Manager">
           <i class="fas fa-file-contract"></i>
@@ -81,6 +84,13 @@
         <a href="/case-studies" class="toolbar-nav-link" title="Case Studies">
           <i class="fas fa-book-open"></i>
           <span class="toolbar-label">Case Studies</span>
+        </a>
+      </li>
+      {% endif %}
+      <li>
+        <a href="/community-directory" class="toolbar-nav-link" title="Community Directory">
+          <i class="fas fa-sitemap"></i>
+          <span class="toolbar-label">Community</span>
         </a>
       </li>
 
@@ -175,14 +185,18 @@
             <i class="fas fa-address-book"></i>
             <span>Contact Management</span>
           </button>
+          {% if current_user.is_admin or current_user.can_access_email_events %}
           <a href="/email-events" class="top-tab">
             <i class="fas fa-envelope-open-text"></i>
             <span>Email &amp; Events</span>
           </a>
+          {% endif %}
+          {% if current_user.is_admin or current_user.can_access_proposals %}
           <a href="/proposals" class="top-tab">
             <i class="fas fa-file-contract"></i>
             <span>Proposal Manager</span>
           </a>
+          {% endif %}
           {% if current_user.is_admin %}
           <a href="/admin" class="top-tab">
             <i class="fas fa-gear"></i>
@@ -206,6 +220,18 @@
         <div class="hero-overlay"></div>
         <div class="hero-pattern" aria-hidden="true"></div>
 
+        <!-- Top-right corner controls, only visible on home screen -->
+        <div style="position:absolute;top:18px;right:24px;display:flex;align-items:center;gap:10px;z-index:10;">
+          {% if current_user.is_admin %}
+          <a href="/admin" style="display:inline-flex;align-items:center;gap:6px;color:rgba(255,255,255,0.85);font-size:0.82rem;font-weight:600;text-decoration:none;padding:8px 16px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.3);border-radius:20px;transition:background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.22)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'">
+            <i class="fas fa-gear"></i> Admin
+          </a>
+          {% endif %}
+          <a href="/logout" style="display:inline-flex;align-items:center;gap:6px;color:rgba(255,255,255,0.85);font-size:0.82rem;font-weight:600;text-decoration:none;padding:8px 16px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.3);border-radius:20px;transition:background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.22)'" onmouseout="this.style.background='rgba(255,255,255,0.12)'">
+            <i class="fas fa-arrow-right-from-bracket"></i> Sign Out
+          </a>
+        </div>
+
         <div class="hero-center hero-sections-center">
           <!-- Brand lockup above the cards -->
           <div class="hero-brand-block">
@@ -227,6 +253,7 @@
               </button>
             </div>
 
+            {% if current_user.is_admin or current_user.can_access_email_events %}
             <div class="section-hero-card">
               <div class="section-card-icon-wrap">
                 <i class="fas fa-envelope-open-text"></i>
@@ -237,7 +264,9 @@
                 Enter <span aria-hidden="true">→</span>
               </a>
             </div>
+            {% endif %}
 
+            {% if current_user.is_admin or current_user.can_access_proposals %}
             <div class="section-hero-card">
               <div class="section-card-icon-wrap">
                 <i class="fas fa-file-contract"></i>
@@ -248,7 +277,10 @@
                 Enter <span aria-hidden="true">→</span>
               </a>
             </div>
+            {% endif %}
           </div>
+
+
         </div>
       </div><!-- /#hero -->
 
@@ -274,6 +306,7 @@
             <div class="search-controls">
               <div class="control-group" role="group" aria-label="Actions">
                 <button id="searchBtn" class="btn btn-primary"><i class="fas fa-magnifying-glass"></i> Search</button>
+                {% if current_user.is_admin or current_user.can_export_contacts %}
                 <div class="export-wrap">
                   <button id="exportMenuBtn" class="btn"><i class="fas fa-download"></i> Export <i class="fas fa-chevron-down" style="font-size:11px;"></i></button>
                   <div id="exportMenu" class="export-menu" style="display:none;">
@@ -282,14 +315,23 @@
                     <button id="exportDocxBtn" class="export-menu-item"><i class="fas fa-file-word"></i> Download Word Doc</button>
                   </div>
                 </div>
+                {% endif %}
+                {% if current_user.is_admin or current_user.can_draft_email or current_user.can_send_email or current_user.can_access_email_events %}
                 <div class="export-wrap">
                   <button id="toolsMenuBtn" class="btn"><i class="fas fa-wand-magic-sparkles"></i> AI Tools <i class="fas fa-chevron-down" style="font-size:11px;"></i></button>
                   <div id="toolsMenu" class="export-menu" style="display:none;">
+                    {% if current_user.is_admin or current_user.can_draft_email %}
                     <button id="draftEmailBtn" class="export-menu-item"><i class="fas fa-wand-magic-sparkles"></i> Draft Email</button>
+                    {% endif %}
+                    {% if current_user.is_admin or current_user.can_send_email %}
                     <button id="sendCampaignBtn" class="export-menu-item"><i class="fas fa-paper-plane"></i> Send Campaign</button>
+                    {% endif %}
+                    {% if current_user.is_admin or current_user.can_access_email_events %}
                     <button id="createFlyerBtn" class="export-menu-item"><i class="fas fa-image"></i> Create Flyer/Post</button>
+                    {% endif %}
                   </div>
                 </div>
+                {% endif %}
               </div>
             </div>
           </div>
@@ -575,7 +617,10 @@
   <!-- ═══════════════════════ SCRIPTS ═══════════════════════ -->
 
   <script>
-    window.IS_ADMIN = {{ 'true' if current_user.is_admin else 'false' }}
+    window.IS_ADMIN       = {{ 'true' if current_user.is_admin else 'false' }}
+    window.CAN_EXPORT     = {{ 'true' if (current_user.is_admin or current_user.can_export_contacts) else 'false' }}
+    window.CAN_DRAFT      = {{ 'true' if (current_user.is_admin or current_user.can_draft_email) else 'false' }}
+    window.CAN_SEND_EMAIL = {{ 'true' if (current_user.is_admin or current_user.can_send_email) else 'false' }}
   </script>
 
   <!-- Lightweight fallback: shows search even if main app.js hasn't loaded yet -->

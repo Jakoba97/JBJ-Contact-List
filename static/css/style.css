@@ -425,10 +425,11 @@ main{padding:24px 0}
 }
 .hero-brand-block{text-align:center}
 .hero-section-grid{
-  display:grid;grid-template-columns:repeat(3,1fr);
+  display:flex;flex-wrap:wrap;justify-content:center;
   gap:24px;width:100%;
 }
 .section-hero-card{
+  flex:0 1 300px;max-width:340px;
   background:rgba(255,255,255,0.1);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   border:1px solid rgba(255,255,255,0.22);

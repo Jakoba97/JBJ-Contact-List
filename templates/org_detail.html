@@ -111,7 +111,18 @@
           </div>
         </div>
         <div class="od-header-actions">
-          <a href="/#search_roles" class="btn"><i class="fas fa-arrow-left"></i> Back</a>
+          <a href="#" id="odBackBtn" class="btn"><i class="fas fa-arrow-left"></i> Back</a>
+          <script>
+            (function(){
+              var ref = document.referrer;
+              var btn = document.getElementById('odBackBtn');
+              if (ref && ref.includes('/community-directory')) {
+                btn.href = '/community-directory';
+              } else {
+                btn.href = '/#search_roles';
+              }
+            })();
+          </script>
           <a href="/#search?q={{ org_name|urlencode }}" class="btn"><i class="fas fa-address-book"></i> All Contacts</a>
         </div>
       </div>

@@ -496,7 +496,7 @@ async function showContactDetail(contact){
             ${incomplete? '<span class="flag flag-warn">Incomplete</span>' : '<span class="flag flag-ok">Complete</span>'}
             ${hasNotes? '<span class="flag flag-info">Has notes</span>' : ''}
             <button id="detailEditBtn" class="btn"><i class="fas fa-pen"></i> Edit</button>
-            <a id="detailExport" class="btn" href="/api/export?id=${encodeURIComponent(c.id||'')}"><i class="fas fa-download"></i> Export</a>
+            ${window.CAN_EXPORT ? `<a id="detailExport" class="btn" href="/api/export?id=${encodeURIComponent(c.id||'')}"><i class="fas fa-download"></i> Export</a>` : ''}
             ${window.IS_ADMIN ? '<button id="detailDeleteBtn" class="btn" style="color:#9b1c1c;"><i class="fas fa-trash"></i> Delete</button>' : ''}
           </div>
           ${pipelineStageSectionHtml(c.pipeline_stage || '')}
