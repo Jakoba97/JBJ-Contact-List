@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Email Builder - JBJ Management</title>
+  <title>Email Builder - CRM Platform</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" />
@@ -66,7 +66,7 @@
   <!-- ── Email & Events side toolbar ────────────────────────── -->
   <nav class="side-toolbar" id="sideToolbar">
     <div class="toolbar-logo-wrap">
-      <img class="toolbar-logo-img" src="/static/img/logo.png" alt="JBJ Management">
+      <img class="toolbar-logo-img" src="/static/img/logo.png" onerror="this.style.display='none'" alt="CRM Platform">
       <span class="toolbar-brand-text">Email &amp; Events</span>
     </div>
 
@@ -247,7 +247,7 @@
 
         <div class="eb-tpl-card" data-tpl="event">
           <div class="eb-tpl-preview">
-            <div style="text-align:center;margin-bottom:6px;"><span style="font-size:9px;font-weight:700;color:#AD0304;letter-spacing:1px;">JBJ MANAGEMENT</span></div>
+            <div style="text-align:center;margin-bottom:6px;"><span style="font-size:9px;font-weight:700;color:#AD0304;letter-spacing:1px;">CRM PLATFORM</span></div>
             <h2>Event Announcement</h2>
             <p>We're excited to invite you to an exclusive event featuring top talent from our roster.</p>
             <p><strong>Date:</strong> Saturday, August 10<br><strong>Venue:</strong> The Venue Name, Dallas TX</p>
@@ -261,10 +261,10 @@
 
         <div class="eb-tpl-card" data-tpl="newsletter">
           <div class="eb-tpl-preview">
-            <div style="text-align:center;margin-bottom:6px;"><span style="font-size:9px;font-weight:700;color:#AD0304;letter-spacing:1px;">JBJ MANAGEMENT</span></div>
+            <div style="text-align:center;margin-bottom:6px;"><span style="font-size:9px;font-weight:700;color:#AD0304;letter-spacing:1px;">CRM PLATFORM</span></div>
             <h2>Monthly Newsletter</h2>
             <h3>What's New This Month</h3>
-            <p>Here's a roundup of the latest news, events, and announcements from JBJ Management.</p>
+            <p>Here's a roundup of the latest news, events, and announcements from CRM Platform.</p>
             <h3>Upcoming Events</h3>
             <p>Check out what's coming up on our calendar this month.</p>
           </div>
@@ -279,7 +279,7 @@
             <p>Hi {{first_name}},</p>
             <p>I wanted to follow up on our recent conversation and see if you had any questions.</p>
             <p>I'd love to connect at your convenience - feel free to reply to this email or reach out directly.</p>
-            <p>Best regards,<br><strong>JBJ Management</strong></p>
+            <p>Best regards,<br><strong>CRM Platform</strong></p>
           </div>
           <div class="eb-tpl-footer">
             <p class="eb-tpl-name">Personal Follow-Up</p>
@@ -289,9 +289,9 @@
 
         <div class="eb-tpl-card" data-tpl="roster">
           <div class="eb-tpl-preview">
-            <div style="text-align:center;margin-bottom:6px;"><span style="font-size:9px;font-weight:700;color:#AD0304;letter-spacing:1px;">JBJ MANAGEMENT</span></div>
+            <div style="text-align:center;margin-bottom:6px;"><span style="font-size:9px;font-weight:700;color:#AD0304;letter-spacing:1px;">CRM PLATFORM</span></div>
             <h2>New Roster Addition</h2>
-            <p>We're thrilled to announce a new addition to the JBJ Management family.</p>
+            <p>We're thrilled to announce a new addition to the CRM Platform family.</p>
             <h3>Artist Name</h3>
             <p>Genre · Based in City, TX</p>
             <div style="text-align:center;"><span class="cta">Learn More</span></div>
@@ -325,22 +325,22 @@
       blank: { subject: '', html: '<p><br></p>' },
       event: {
         subject: 'You\'re Invited - [Event Name]',
-        html: `<div style="text-align:center;margin:16px 0;"><img src="/static/img/logo.png" alt="JBJ Management" style="width:160px;max-width:100%;"></div>
+        html: `<div style="text-align:center;margin:16px 0;"><img src="/static/img/logo.png" onerror="this.style.display='none'" alt="CRM Platform" style="width:160px;max-width:100%;"></div>
 <h2 style="font-family:'Archivo Black',sans-serif;color:#AD0304;border-bottom:2px solid #AD0304;padding-bottom:8px;margin:20px 0 12px;">You're Invited</h2>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;">Hi {{first_name}},</p>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;">We're excited to invite you to an exclusive event featuring top talent from our roster. This is a great opportunity to connect, enjoy live performances, and celebrate the art of music.</p>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;"><strong>Date:</strong> Saturday, August 10<br><strong>Time:</strong> 7:00 PM - 11:00 PM<br><strong>Venue:</strong> The Venue Name, Dallas, TX</p>
 <div style="text-align:center;margin:20px 0;"><a href="#" style="background:#AD0304;color:#ffffff;display:inline-block;padding:14px 32px;border-radius:999px;font-weight:600;text-decoration:none;font-size:16px;">Register Here</a></div>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;">We hope to see you there!</p>
-<div style="margin:24px 0 0;padding-top:16px;border-top:1px solid #eee;font-size:14px;line-height:1.6;"><strong>JBJ Management</strong><br><span style="color:#555;">Dallas, TX</span></div>
-<div style="text-align:center;font-size:12px;color:#aaa;padding:20px 0;margin-top:24px;border-top:1px solid #eee;line-height:1.6;">JBJ Management · Dallas, TX<br><a href="#" style="color:#aaa;">Unsubscribe</a></div>`
+<div style="margin:24px 0 0;padding-top:16px;border-top:1px solid #eee;font-size:14px;line-height:1.6;"><strong>CRM Platform</strong><br><span style="color:#555;">Dallas, TX</span></div>
+<div style="text-align:center;font-size:12px;color:#aaa;padding:20px 0;margin-top:24px;border-top:1px solid #eee;line-height:1.6;">CRM Platform · Dallas, TX<br><a href="#" style="color:#aaa;">Unsubscribe</a></div>`
       },
       newsletter: {
-        subject: 'JBJ Management - [Month] Newsletter',
-        html: `<div style="text-align:center;margin:16px 0;"><img src="/static/img/logo.png" alt="JBJ Management" style="width:160px;max-width:100%;"></div>
+        subject: 'CRM Platform - [Month] Newsletter',
+        html: `<div style="text-align:center;margin:16px 0;"><img src="/static/img/logo.png" onerror="this.style.display='none'" alt="CRM Platform" style="width:160px;max-width:100%;"></div>
 <h2 style="font-family:'Archivo Black',sans-serif;color:#AD0304;border-bottom:2px solid #AD0304;padding-bottom:8px;margin:20px 0 12px;">What's New This Month</h2>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;">Hi {{first_name}},</p>
-<p style="line-height:1.6;color:#333;margin:0 0 12px;">Here's a roundup of the latest news, events, and announcements from the JBJ Management team.</p>
+<p style="line-height:1.6;color:#333;margin:0 0 12px;">Here's a roundup of the latest news, events, and announcements from the CRM Platform team.</p>
 <h3 style="color:#3D4041;margin:16px 0 8px;">Upcoming Events</h3>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;">Check out what's coming up on our calendar this month. We have some exciting shows and appearances lined up.</p>
 <hr style="border:none;border-top:2px solid #e0e0e0;margin:20px 0;">
@@ -350,39 +350,39 @@
 <h3 style="color:#3D4041;margin:16px 0 8px;">Industry Updates</h3>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;">Stay in the loop with the latest from the music and entertainment industry.</p>
 <div style="text-align:center;padding:14px 0;font-size:14px;letter-spacing:0.5px;"><a href="#" style="color:#AD0304;text-decoration:none;margin:0 10px;font-weight:600;">Facebook</a><span style="color:#ccc;">·</span><a href="#" style="color:#AD0304;text-decoration:none;margin:0 10px;font-weight:600;">Instagram</a><span style="color:#ccc;">·</span><a href="#" style="color:#AD0304;text-decoration:none;margin:0 10px;font-weight:600;">LinkedIn</a></div>
-<div style="text-align:center;font-size:12px;color:#aaa;padding:20px 0;margin-top:24px;border-top:1px solid #eee;line-height:1.6;">JBJ Management · Dallas, TX<br>This email was sent to you because you are part of our outreach network.<br><a href="#" style="color:#aaa;">Unsubscribe</a></div>`
+<div style="text-align:center;font-size:12px;color:#aaa;padding:20px 0;margin-top:24px;border-top:1px solid #eee;line-height:1.6;">CRM Platform · Dallas, TX<br>This email was sent to you because you are part of our outreach network.<br><a href="#" style="color:#aaa;">Unsubscribe</a></div>`
       },
       followup: {
-        subject: 'Following Up - JBJ Management',
+        subject: 'Following Up - CRM Platform',
         html: `<p style="line-height:1.6;color:#333;margin:0 0 12px;">Hi {{first_name}},</p>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;">I wanted to follow up on our recent conversation and see if you had any questions or if there's anything I can help with.</p>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;">I'd love to connect at your convenience - feel free to reply to this email or reach out directly.</p>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;">Looking forward to hearing from you!</p>
-<div style="margin:24px 0 0;padding-top:16px;border-top:1px solid #eee;font-size:14px;line-height:1.6;"><strong>Your Name</strong><br><span style="color:#555;">Title · JBJ Management</span><br><span style="color:#888;">email@jbj-management.com · (555) 000-0000</span></div>`
+<div style="margin:24px 0 0;padding-top:16px;border-top:1px solid #eee;font-size:14px;line-height:1.6;"><strong>Your Name</strong><br><span style="color:#555;">Title · CRM Platform</span><br><span style="color:#888;">email@company.com · (555) 000-0000</span></div>`
       },
       roster: {
-        subject: 'Exciting News - New Addition to the JBJ Roster',
-        html: `<div style="text-align:center;margin:16px 0;"><img src="/static/img/logo.png" alt="JBJ Management" style="width:160px;max-width:100%;"></div>
+        subject: 'Exciting News - New Addition to Our Roster',
+        html: `<div style="text-align:center;margin:16px 0;"><img src="/static/img/logo.png" onerror="this.style.display='none'" alt="CRM Platform" style="width:160px;max-width:100%;"></div>
 <h2 style="font-family:'Archivo Black',sans-serif;color:#AD0304;border-bottom:2px solid #AD0304;padding-bottom:8px;margin:20px 0 12px;">New Roster Addition</h2>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;">Hi {{first_name}},</p>
-<p style="line-height:1.6;color:#333;margin:0 0 12px;">We're thrilled to announce a new addition to the JBJ Management family. We're proud to welcome them and can't wait for you to hear more about their incredible work.</p>
+<p style="line-height:1.6;color:#333;margin:0 0 12px;">We're thrilled to announce a new addition to the CRM Platform family. We're proud to welcome them and can't wait for you to hear more about their incredible work.</p>
 <h3 style="color:#3D4041;margin:16px 0 8px;">Artist Name</h3>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;"><strong>Genre:</strong> Genre Name<br><strong>Based in:</strong> City, TX</p>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;">Add a brief bio or description of the artist here. What makes them unique? What are they working on?</p>
 <div style="text-align:center;margin:20px 0;"><a href="#" style="background:#AD0304;color:#ffffff;display:inline-block;padding:14px 32px;border-radius:999px;font-weight:600;text-decoration:none;font-size:16px;">Learn More</a></div>
-<div style="margin:24px 0 0;padding-top:16px;border-top:1px solid #eee;font-size:14px;line-height:1.6;"><strong>JBJ Management</strong><br><span style="color:#555;">Dallas, TX</span></div>
-<div style="text-align:center;font-size:12px;color:#aaa;padding:20px 0;margin-top:24px;border-top:1px solid #eee;line-height:1.6;">JBJ Management · Dallas, TX<br><a href="#" style="color:#aaa;">Unsubscribe</a></div>`
+<div style="margin:24px 0 0;padding-top:16px;border-top:1px solid #eee;font-size:14px;line-height:1.6;"><strong>CRM Platform</strong><br><span style="color:#555;">Dallas, TX</span></div>
+<div style="text-align:center;font-size:12px;color:#aaa;padding:20px 0;margin-top:24px;border-top:1px solid #eee;line-height:1.6;">CRM Platform · Dallas, TX<br><a href="#" style="color:#aaa;">Unsubscribe</a></div>`
       },
       reminder: {
         subject: 'Reminder - [Event Name] This Weekend',
-        html: `<div style="text-align:center;margin:16px 0;"><img src="/static/img/logo.png" alt="JBJ Management" style="width:160px;max-width:100%;"></div>
+        html: `<div style="text-align:center;margin:16px 0;"><img src="/static/img/logo.png" onerror="this.style.display='none'" alt="CRM Platform" style="width:160px;max-width:100%;"></div>
 <div style="background:#1a1a1a;color:#ffffff;padding:16px 20px;border-radius:8px;text-align:center;margin:16px 0;"><strong style="font-size:18px;">📢 Event Reminder</strong><p style="margin:8px 0 0;opacity:0.85;">Don't forget - we're happening this weekend!</p></div>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;">Hi {{first_name}},</p>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;">Just a friendly reminder that our upcoming event is right around the corner. We'd love to see you there!</p>
 <p style="line-height:1.6;color:#333;margin:0 0 12px;"><strong>Date:</strong> This Saturday<br><strong>Time:</strong> 7:00 PM<br><strong>Location:</strong> Venue Name, Dallas, TX</p>
 <div style="text-align:center;margin:20px 0;"><a href="#" style="background:#AD0304;color:#ffffff;display:inline-block;padding:14px 32px;border-radius:999px;font-weight:600;text-decoration:none;font-size:16px;">View Details</a></div>
-<div style="margin:24px 0 0;padding-top:16px;border-top:1px solid #eee;font-size:14px;line-height:1.6;"><strong>JBJ Management</strong><br><span style="color:#555;">Dallas, TX</span></div>
-<div style="text-align:center;font-size:12px;color:#aaa;padding:20px 0;margin-top:24px;border-top:1px solid #eee;line-height:1.6;">JBJ Management · Dallas, TX<br><a href="#" style="color:#aaa;">Unsubscribe</a></div>`
+<div style="margin:24px 0 0;padding-top:16px;border-top:1px solid #eee;font-size:14px;line-height:1.6;"><strong>CRM Platform</strong><br><span style="color:#555;">Dallas, TX</span></div>
+<div style="text-align:center;font-size:12px;color:#aaa;padding:20px 0;margin-top:24px;border-top:1px solid #eee;line-height:1.6;">CRM Platform · Dallas, TX<br><a href="#" style="color:#aaa;">Unsubscribe</a></div>`
       },
     }
 

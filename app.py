@@ -365,7 +365,7 @@ def _seed_civic_orgs():
 def _seed_demo_contacts():
     """Auto-seed realistic fake contacts on first boot when the DB is empty.
     Covers every filter (tag, county, organization, status, pipeline stage)
-    so interviewers can test the full UI without any real JBJ data."""
+    so interviewers can test the full UI without any real company data."""
     if Contact.query.count() > 0:
         return  # already seeded, do nothing
 
@@ -721,7 +721,7 @@ def absolutize_static_urls(html, base_url):
 def _sg_from():
     """Returns (from_email, from_name) from env vars."""
     from_email = os.environ.get('SMTP_FROM_EMAIL') or os.environ.get('SENDGRID_FROM_EMAIL')  # read the "From" email address from .env (tries both names)
-    from_name  = os.environ.get('SMTP_FROM_NAME', 'JBJ Management')  # read the "From" display name from .env, defaulting to "JBJ Management"
+    from_name  = os.environ.get('SMTP_FROM_NAME', 'CRM Platform')  # read the "From" display name from .env, defaulting to "CRM Platform"
     return from_email, from_name                               # return both as a pair
 
 
@@ -751,7 +751,7 @@ def send_email_smtp(to_email, subject, html_body, attachments=None):
 
     msg = MIMEMultipart('mixed')                              # create a new email message container
     msg['Subject'] = subject or '(no subject)'               # set the email subject line
-    msg['From'] = f'{from_name} <{from_email}>'              # set the From header (e.g. "JBJ Management <info@jbj.com>")
+    msg['From'] = f'{from_name} <{from_email}>'              # set the From header (e.g. "CRM Platform <info@company.com>")
     msg['To'] = to_email                                      # set the To header
     alt = MIMEMultipart('alternative')                        # create an inner container for the email body
     alt.attach(MIMEText(html_body, 'html'))                   # add the HTML body to the message
@@ -1331,7 +1331,7 @@ def create_app(config_class=Config):
         cs_ids      = data.get('case_study_ids') or []
 
         # Build context block
-        lines = ['You are drafting a project proposal for JBJ Management.']
+        lines = ['You are drafting a project proposal for our organization.']
         if title:        lines.append(f'Proposal title: {title}')
         if client_name:  lines.append(f'Client: {client_name}')
         if client_org:   lines.append(f'Organization: {client_org}')
@@ -1355,7 +1355,7 @@ def create_app(config_class=Config):
             user_content += f'\n\nAdditional context from the user: {user_prompt}'
 
         system = (
-            'You write professional project proposals for JBJ Management, a talent and project management company. '
+            'You write professional project proposals for our organization, a talent and project management company. '
             'Given the context below, write two sections:\n'
             '1. A concise "Overview" paragraph (3-5 sentences) that summarizes the project and its value to the client.\n'
             '2. A "Scope of Work" section (4-8 bullet points) that details deliverables, services, and milestones.\n'
@@ -2098,7 +2098,7 @@ def create_app(config_class=Config):
         if not contacts:
             return jsonify({'error': 'No contacts with email addresses match that filter.'}), 400
 
-        subject = subject_override or t.subject or t.name or 'Email from JBJ Management'
+        subject = subject_override or t.subject or t.name or 'Email from CRM Platform'
 
         def replace_tags(text, contact):
             replacements = {
@@ -3071,7 +3071,7 @@ def create_app(config_class=Config):
                 )
 
         system = (
-            "You draft outreach emails for JBJ Management, sent to community contacts "
+            "You draft outreach emails for our organization, sent to community contacts "
             "(elected officials, organizations, clergy, chambers of commerce, etc). Write "
             "a complete, professional but warm email with a subject line and body, tailored "
             "to the recipient group described. Use \"[Name]\" as a placeholder for the "
@@ -3231,7 +3231,7 @@ def create_app(config_class=Config):
 
         copy_system = (
             "You write short marketing copy for a single social media post or printed "
-            "flyer image for JBJ Management, a community/government-relations firm. "
+            "flyer image for our organization, a community/government-relations firm. "
             'Respond with ONLY valid JSON, no commentary or markdown fences, in this '
             'exact shape: {"headline": "...", "body": "..."}. The headline must be 3-7 '
             "words, punchy, no ending period. The body must be 1-2 short sentences, 25 "
@@ -3255,12 +3255,12 @@ def create_app(config_class=Config):
                 if raw_text.startswith('json'):
                     raw_text = raw_text[4:]
             parsed = json.loads(raw_text)
-            headline = (parsed.get('headline') or '').strip() or 'JBJ Management'
+            headline = (parsed.get('headline') or '').strip() or 'CRM Platform'
             body = (parsed.get('body') or '').strip()
         except Exception as e:
             return jsonify({'error': f'Groq API error: {e}'}), 502
         except Exception:
-            headline = raw_text[:60] or 'JBJ Management'
+            headline = raw_text[:60] or 'CRM Platform'
             body = ''
 
         # Build a clean background using the chosen palette and style.
@@ -4622,10 +4622,10 @@ def create_app(config_class=Config):
                 time_label = _dt.combine(req_date, start).strftime('%-I:%M %p')
                 html = (
                     f'<p>Hi {booking.name},</p>'
-                    f'<p>Your meeting with JBJ Management has been confirmed for '
+                    f'<p>Your meeting has been confirmed for '
                     f'<strong>{day_label} at {time_label}</strong>.</p>'
                     f'<p>If you need to cancel or reschedule, please reply to this email.</p>'
-                    f'<p>- JBJ Management</p>'
+                    f'<p>- Our Team</p>'
                 )
                 import json as _json2
                 import urllib.request as _urlreq2
