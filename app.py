@@ -362,6 +362,158 @@ def _seed_civic_orgs():
         db.session.commit()
 
 
+def _seed_demo_contacts():
+    """Auto-seed realistic fake contacts on first boot when the DB is empty.
+    Covers every filter (tag, county, organization, status, pipeline stage)
+    so interviewers can test the full UI without any real JBJ data."""
+    if Contact.query.count() > 0:
+        return  # already seeded, do nothing
+
+    import random
+    from datetime import date as _date, timedelta as _td
+
+    rng = random.Random(42)  # fixed seed so data is consistent across redeploys
+
+    PEOPLE = [
+        ("James","Washington"),("Maria","Gonzalez"),("David","Thompson"),("Linda","Patel"),
+        ("Robert","Kim"),("Patricia","Johnson"),("Michael","Davis"),("Barbara","Martinez"),
+        ("William","Anderson"),("Susan","Taylor"),("Richard","Moore"),("Jessica","Jackson"),
+        ("Joseph","Harris"),("Sarah","White"),("Thomas","Robinson"),("Karen","Clark"),
+        ("Charles","Lewis"),("Lisa","Walker"),("Christopher","Hall"),("Nancy","Young"),
+        ("Daniel","Allen"),("Matthew","Scott"),("Anthony","Green"),("Mark","Baker"),
+        ("Donald","Adams"),("Steven","Nelson"),("Paul","Hill"),("Andrew","Rivera"),
+        ("Kenneth","Campbell"),("George","Mitchell"),("Joshua","Carter"),("Kevin","Roberts"),
+        ("Brian","Turner"),("Edward","Phillips"),("Ronald","Evans"),("Timothy","Torres"),
+        ("Jason","Parker"),("Jeffrey","Collins"),("Ryan","Edwards"),("Jacob","Stewart"),
+        ("Gary","Flores"),("Nicholas","Morris"),("Eric","Nguyen"),("Jonathan","Murphy"),
+        ("Stephen","Rivera"),("Larry","Cook"),("Justin","Rogers"),("Scott","Morgan"),
+        ("Brandon","Peterson"),("Benjamin","Cooper"),("Angela","Reed"),("Melissa","Bailey"),
+        ("Stephanie","Bell"),("Rebecca","Kelly"),("Sharon","Howard"),("Laura","Ward"),
+        ("Cynthia","Cox"),("Kathleen","Diaz"),("Amy","Richardson"),("Shirley","Wood"),
+    ]
+
+    ORGS = [
+        ("City of Dallas","City Council","Municipal Government"),
+        ("Dallas County","County Official","County Government"),
+        ("Dallas ISD","Education Leader","Education"),
+        ("North Texas Council of Governments","Regional Official","Regional Government"),
+        ("Dallas Area Rapid Transit","Transportation","Transportation"),
+        ("Greater Dallas Chamber","Business Leader","Business"),
+        ("Dallas Black Chamber of Commerce","Business Leader","Business"),
+        ("United Way of Metropolitan Dallas","Nonprofit Leader","Nonprofit"),
+        ("Communities Foundation of Texas","Nonprofit Leader","Nonprofit"),
+        ("North Texas Food Bank","Nonprofit Leader","Nonprofit"),
+        ("Parkland Health","Healthcare","Healthcare"),
+        ("UT Southwestern Medical Center","Healthcare","Healthcare"),
+        ("Southern Methodist University","Education Leader","Education"),
+        ("University of Texas at Dallas","Education Leader","Education"),
+        ("Texas Department of Transportation","State Legislator","State Government"),
+        ("Texas Education Agency","State Legislator","State Government"),
+        ("Office of the Governor","State Legislator","State Government"),
+        ("Dallas Housing Authority","City Council","Municipal Government"),
+        ("DART Police","City Council","Municipal Government"),
+        ("Dallas Water Utilities","City Council","Municipal Government"),
+    ]
+
+    TITLES = [
+        "Executive Director","Chief of Staff","Deputy Director","Policy Advisor",
+        "Communications Director","Government Affairs Manager","Senior Advisor",
+        "Director of Community Engagement","Deputy Chief of Staff","Program Manager",
+        "Legislative Liaison","Public Affairs Coordinator","Chief Operating Officer",
+        "Director of External Affairs","Senior Policy Analyst","Vice President",
+        "Community Relations Manager","Director of Development","Chief Executive Officer",
+        "Assistant Director","Senior Manager","Director of Operations",
+        "Board Member","Commissioner","Council Member","Deputy Commissioner",
+    ]
+
+    COUNTIES = ["Dallas","Tarrant","Collin","Denton","Rockwall","Ellis","Kaufman"]
+    STAGES   = ["lead","qualified","proposal","closed_won","closed_lost",None]
+    CHANNELS = ["phone","email","in-person","event"]
+    NOTES_POOL = [
+        "Met at Chamber luncheon. Very receptive to partnership discussions.",
+        "Called re: infrastructure bill. Wants briefing before committee vote.",
+        "Introduced at gala. Scheduled follow-up coffee for next month.",
+        "Key contact for procurement opportunities in the district.",
+        "Attended town hall. Expressed interest in community programs.",
+        "Connected via mutual referral. Strong advocate for housing policy.",
+        "Follow up after legislative session ends.",
+        "Prefers email communication. Responds within 24 hours.",
+    ]
+    ACTIVITY_POOL = [
+        "Called to discuss upcoming budget session. Will follow up next week.",
+        "Met at Chamber event. Expressed interest in partnership opportunities.",
+        "Sent briefing on infrastructure priorities. Awaiting response.",
+        "Coffee meeting downtown. Discussed community engagement strategy.",
+        "Attended town hall. Connected during Q&A session.",
+        "Email exchange regarding upcoming legislative session priorities.",
+        "Introduced at nonprofit gala. Exchanged cards, scheduling follow-up.",
+        "Phone call re: procurement opportunities. Very receptive.",
+        "Attended city council meeting. Brief conversation after adjournment.",
+        "Sent proposal overview. Requested 30-minute call to review.",
+        "Zoom briefing on regional transit expansion. Very engaged.",
+        "Left voicemail. Will try again Thursday.",
+        "Forwarded policy one-pager. Waiting for feedback.",
+        "Met with chief of staff. Decision maker is the director.",
+    ]
+
+    def rphone():
+        area = rng.choice(["214","972","469","817","682"])
+        return f"({area}) {rng.randint(200,999)}-{rng.randint(1000,9999)}"
+
+    def rdate(days=400):
+        return _date.today() - _td(days=rng.randint(0, days))
+
+    contacts = []
+    used_emails = set()
+    for i, (first, last) in enumerate(PEOPLE):
+        org_name, tag, industry = rng.choice(ORGS)
+        title   = rng.choice(TITLES)
+        county  = rng.choice(COUNTIES)
+        stage   = rng.choice(STAGES)
+        domain  = org_name.lower().replace(" ","").replace(",","").replace(".","")[:14]
+        email   = f"{first.lower()}.{last.lower()}@{domain}.org"
+        if email in used_emails:
+            email = f"{first.lower()}.{last.lower()}{i}@{domain}.org"
+        used_emails.add(email)
+
+        c = Contact(
+            first_name=first,
+            last_name=last,
+            organization=org_name,
+            title=title,
+            email=email if rng.random() > 0.08 else None,
+            phone_cell=rphone() if rng.random() > 0.25 else None,
+            phone_office=rphone() if rng.random() > 0.45 else None,
+            tag=tag,
+            county=county,
+            industry=industry,
+            active="Active" if rng.random() > 0.12 else "Inactive",
+            added=rdate(500),
+            data_complete=rng.random() > 0.18,
+            is_favorite=rng.random() > 0.82,
+            pipeline_stage=stage,
+            notes=rng.choice(NOTES_POOL) if rng.random() > 0.5 else None,
+        )
+        db.session.add(c)
+        contacts.append(c)
+
+    db.session.flush()  # get IDs without committing
+
+    # Activity logs for ~35 contacts
+    for c in rng.sample(contacts, min(35, len(contacts))):
+        for _ in range(rng.randint(1, 3)):
+            db.session.add(Activity(
+                contact_id=c.id,
+                organization=c.organization,
+                employee_name="Demo Admin",
+                channel=rng.choice(CHANNELS),
+                summary=rng.choice(ACTIVITY_POOL),
+                contacted_on=rdate(180),
+            ))
+
+    db.session.commit()
+
+
 _SHEET_FIELDS = [                        # the list of contact fields that can be updated when syncing from a spreadsheet
     'first_name', 'last_name', 'organization', 'title',
     'phone_office', 'phone_cell', 'phone_personal', 'phone_misc',
@@ -936,6 +1088,7 @@ def create_app(config_class=Config):
                 db.session.rollback()                # if the column already exists, this will fail safely - just roll back and continue
         _bootstrap_admin_user()                      # create the first admin account from .env if no users exist yet
         _seed_civic_orgs()                           # seed Dallas civic orgs into the outreach org table if not already there
+        _seed_demo_contacts()                        # auto-seed fake contacts on first boot if DB is empty (portfolio demo)
 
     # Start background scheduler for email sequences
     try:
