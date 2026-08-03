@@ -1,3 +1,8 @@
+# =============================================================================
+# Author: Kadin Lee-Smith
+# Database models for the Contact & Relationship Management Platform.
+# All models, relationships, and schema designed by Kadin Lee-Smith.
+# =============================================================================
 from datetime import datetime, date, time as dtime, timedelta
 from sqlalchemy import Index
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -5,6 +10,7 @@ from flask_login import UserMixin
 from db import db
 
 
+# User model + granular permission flags — Kadin Lee-Smith
 class User(db.Model, UserMixin):
     """An employee login. Accounts are created via create_user.py -- there's
     no public registration since this is an internal tool."""
@@ -74,6 +80,7 @@ class LoginEvent(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
+# Contact model with scoring, soft delete, and pipeline stage — Kadin Lee-Smith
 class Contact(db.Model):
     __tablename__ = 'contacts'
 
@@ -187,6 +194,7 @@ class Contact(db.Model):
         return min(s, 100)
 
 
+# Community organization outreach tracking — Kadin Lee-Smith
 class OutreachOrg(db.Model):
     """Organization-level outreach checklist (category + org + last-touched date + notes),
     distinct from the per-person Contact table. Backs the Sections page."""
@@ -310,6 +318,7 @@ class CaseStudy(db.Model):
         }
 
 
+# Email campaign template model — Kadin Lee-Smith
 class EmailTemplate(db.Model):
     """A saved email design built in the drag-and-drop email builder --
     blocks is an ordered list of {type, ...props} dicts the builder's
@@ -341,6 +350,7 @@ class EmailTemplate(db.Model):
         }
 
 
+# Flyer / social media graphic template — Kadin Lee-Smith
 class FlyerTemplate(db.Model):
     """A saved flyer/social-post design built in the free-canvas flyer
     builder -- elements is an ordered list of {type, x, y, width, height,
@@ -557,6 +567,7 @@ class EmailSequenceEnrollment(db.Model):
         }
 
 
+# Public landing page + lead capture model — Kadin Lee-Smith
 class LandingPage(db.Model):
     __tablename__ = 'landing_pages'
 
@@ -645,6 +656,7 @@ class AvailabilityRule(db.Model):
         }
 
 
+# Appointment booking model — Kadin Lee-Smith
 class Booking(db.Model):
     __tablename__ = 'bookings'
 
@@ -674,6 +686,7 @@ class Booking(db.Model):
         }
 
 
+# Project proposal model — Kadin Lee-Smith
 class Proposal(db.Model):
     """A client proposal assembled from case studies, contacts, and custom
     sections. Built entirely inside the app - no external editor needed."""

@@ -1,3 +1,10 @@
+# =============================================================================
+# Author: Kadin Lee-Smith
+# Contact & Relationship Management Platform
+# Full-stack Flask/PostgreSQL web application — designed, built, and deployed
+# by Kadin Lee-Smith. All core logic, routing, data models, and UI written
+# by Kadin Lee-Smith during a management internship (2025–2026).
+# =============================================================================
 import os                       # lets the app read environment variables (like API keys) from your .env file
 import io                       # handles data in memory, like reading/writing files without saving them to disk first
 import re                       # "regular expressions" - searches for patterns inside text (e.g. find all email addresses)
@@ -49,6 +56,7 @@ login_manager.login_view = 'login'  # if someone visits a protected page while l
 limiter = Limiter(key_func=get_remote_address, default_limits=[])  # sets up rate limiting - uses the visitor's IP address to track them; default_limits=[] means limits are set individually per route, not globally
 
 
+# --- Query helpers — written by Kadin Lee-Smith ---
 def parse_multi_param(name):
     """Several filters (county, tag, org_tag) are multi-select -- the
     frontend sends the chosen values as a single comma-joined query param
@@ -253,6 +261,7 @@ def format_audit_summary(entry):
     return f"{line} - {detail}" if detail else line                           # combine into one line, or return just the label if no detail
 
 
+# --- Startup bootstrap — Kadin Lee-Smith ---
 def _bootstrap_admin_user():
     """Create one admin account from env vars if no user exists yet.
 
@@ -362,6 +371,7 @@ def _seed_civic_orgs():
         db.session.commit()
 
 
+# --- Demo data seeder — written by Kadin Lee-Smith ---
 def _seed_demo_contacts():
     """Auto-seed realistic fake contacts on first boot when the DB is empty.
     Covers every filter (tag, county, organization, status, pipeline stage)
@@ -525,6 +535,7 @@ _SHEET_FIELDS = [                        # the list of contact fields that can b
 ]
 
 
+# --- Spreadsheet import engine — Kadin Lee-Smith ---
 def _import_contacts(df, result, archive_missing=False):
     """Upsert a People-sheet DataFrame into Contact.
 
@@ -718,6 +729,7 @@ def absolutize_static_urls(html, base_url):
     return re.sub(r'(src|href)="(/static/[^"]*)"', lambda m: f'{m.group(1)}="{base}{m.group(2)}"', html)  # find all relative /static/... links and add the full domain in front
 
 
+# --- Email sending layer (SMTP + SendGrid) — Kadin Lee-Smith ---
 def _sg_from():
     """Returns (from_email, from_name) from env vars."""
     from_email = os.environ.get('SMTP_FROM_EMAIL') or os.environ.get('SENDGRID_FROM_EMAIL')  # read the "From" email address from .env (tries both names)
@@ -937,6 +949,7 @@ def _sendgrid_campaign_tracked(api_key, recipients, subject, html_body, send_id)
     return sent, failed
 
 
+# --- Automated email sequence engine — Kadin Lee-Smith ---
 def _enroll_contact_in_sequences(contact_id, stage):
     """Enroll a contact in all active sequences triggered by the given stage,
     skipping if already enrolled and active."""
@@ -1056,6 +1069,7 @@ def _run_import_task(app_obj, task_id, file_bytes, filename, archive_missing):
             task['details'] = traceback.format_exc() # capture the full error details for debugging
 
 
+# --- Application factory — all routes and features wired by Kadin Lee-Smith ---
 def create_app(config_class=Config):
     app = Flask(__name__)                            # create the Flask web application instance
     app.config.from_object(config_class)            # load settings from the Config class in config.py
@@ -1126,6 +1140,7 @@ def create_app(config_class=Config):
     # of the ~20 routes individually, so a newly added route can't
     # accidentally end up unprotected.
     @app.before_request
+    # Auth guard — centralized login protection written by Kadin Lee-Smith
     def require_login():
         if request.endpoint in (None, 'login', 'static'):  # allow the login page and static files (CSS/JS/images) without login
             return None
@@ -1255,6 +1270,7 @@ def create_app(config_class=Config):
                                proposals=proposals,
                                status_filter=status_filter)
 
+    # --- Proposals API — Kadin Lee-Smith ---
     @app.route('/api/proposals', methods=['GET'])
     @login_required
     def list_proposals():
@@ -1525,6 +1541,7 @@ def create_app(config_class=Config):
         db.session.commit()
         return jsonify({'updated': updated})
 
+    # --- Contact deduplication & merge tool — Kadin Lee-Smith ---
     @app.route('/admin/merge')
     def contact_merge_page():
         if not current_user.is_admin:
@@ -1800,6 +1817,7 @@ def create_app(config_class=Config):
         } for e in rows]
         return jsonify({'count': len(entries), 'entries': entries})
 
+    # --- User management + granular permission system — Kadin Lee-Smith ---
     @app.route('/api/users', methods=['POST'])
     def create_user_api():
         # Lets an admin create more employee logins from the browser, so
@@ -2016,6 +2034,7 @@ def create_app(config_class=Config):
         ).order_by(EmailTemplate.updated_at.desc()).all()
         return jsonify({'email_templates': [t.to_dict() for t in items]})
 
+    # --- Email template builder API — Kadin Lee-Smith ---
     @app.route('/api/email-templates', methods=['POST'])
     def create_email_template():
         data = request.get_json(force=True) or {}
@@ -2229,6 +2248,7 @@ def create_app(config_class=Config):
         ).order_by(FlyerTemplate.updated_at.desc()).all()
         return jsonify({'flyer_templates': [t.to_dict() for t in items]})
 
+    # --- Flyer / social media designer API — Kadin Lee-Smith ---
     @app.route('/api/flyer-templates', methods=['POST'])
     def create_flyer_template():
         data = request.get_json(force=True) or {}
@@ -2400,6 +2420,7 @@ def create_app(config_class=Config):
             mimetype=asset.mimetype,
         )
 
+    # --- Contact list, search, and filter API — Kadin Lee-Smith ---
     @app.route('/api/contacts', methods=['GET'])
     def list_contacts():
         q = request.args.get('q', type=str)
@@ -2652,6 +2673,7 @@ def create_app(config_class=Config):
             avg_score=avg_score,
         )
 
+    # --- Organization activity log API — Kadin Lee-Smith ---
     @app.route('/api/organizations/<organization>/activity', methods=['GET'])
     def list_org_activity(organization):
         rows = Activity.query.filter(func.lower(Activity.organization) == organization.lower()) \
@@ -2817,6 +2839,7 @@ def create_app(config_class=Config):
 
         return jsonify({'page': page, 'limit': limit, 'total': total, 'organizations': page_items})
 
+    # --- Background file upload & import pipeline — Kadin Lee-Smith ---
     @app.route('/api/upload', methods=['POST'])
     def upload():
         if not current_user.is_admin:
@@ -3009,6 +3032,7 @@ def create_app(config_class=Config):
         return send_file(buf, mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                           as_attachment=True, download_name=f'{safe_name}_export.docx')
 
+    # --- AI email drafting (Groq/LLaMA) — Kadin Lee-Smith ---
     @app.route('/api/draft-email', methods=['POST'])
     @login_required
     def draft_email():
@@ -3097,6 +3121,7 @@ def create_app(config_class=Config):
         draft = response.choices[0].message.content
         return jsonify({'draft': draft, 'recipient_count': len(rows)})
 
+    # --- AI flyer image generator using Pillow — Kadin Lee-Smith ---
     @app.route('/api/flyer-bg-preview')
     def flyer_bg_preview():
         """Returns a small PNG thumbnail of a background style + color combination."""
@@ -3648,7 +3673,7 @@ def create_app(config_class=Config):
         return jsonify({'sent': sent, 'failed': failed, 'total': len(recipients)})
 
     # ------------------------------------------------------------------ #
-    # Tasks                                                                #
+    # Tasks — written by Kadin Lee-Smith                                  #
     # ------------------------------------------------------------------ #
 
     def _task_urgency(task, today):
@@ -3818,6 +3843,7 @@ def create_app(config_class=Config):
     with app.app_context():
         db.create_all()  # creates email_events table if missing
 
+    # --- SendGrid webhook + email open/click tracking — Kadin Lee-Smith ---
     @app.route('/webhooks/sendgrid', methods=['POST'])
     def sendgrid_webhook():
         """Receives open/click/bounce events from SendGrid Event Webhook.
@@ -4040,6 +4066,7 @@ def create_app(config_class=Config):
         })
         return redirect(f'https://www.facebook.com/dialog/oauth?{params}')
 
+    # --- Facebook OAuth integration — Kadin Lee-Smith ---
     @app.route('/social/facebook/callback')
     @login_required
     def facebook_callback():
@@ -4256,6 +4283,7 @@ def create_app(config_class=Config):
         seqs = EmailSequence.query.order_by(EmailSequence.created_at.desc()).all()
         return render_template('sequences_admin.html', sequences=seqs)
 
+    # --- Email sequence automation API — Kadin Lee-Smith ---
     @app.route('/api/sequences', methods=['GET'])
     @login_required
     def list_sequences():
@@ -4368,6 +4396,7 @@ def create_app(config_class=Config):
         page = LandingPage.query.get_or_404(page_id)
         return render_template('landing_page_editor.html', page=page)
 
+    # --- Landing page builder + public submission handler — Kadin Lee-Smith ---
     @app.route('/api/landing-pages', methods=['POST'])
     @login_required
     def create_landing_page():
@@ -4506,6 +4535,7 @@ def create_app(config_class=Config):
         rules = AvailabilityRule.query.order_by(AvailabilityRule.day_of_week).all()
         return render_template('scheduler_admin.html', rules=rules)
 
+    # --- Appointment scheduler & booking system — Kadin Lee-Smith ---
     @app.route('/api/scheduler/availability', methods=['GET'])
     @login_required
     def get_availability():
@@ -4680,6 +4710,10 @@ def create_app(config_class=Config):
     return app
 
 
+# =============================================================================
+# End of application — authored by Kadin Lee-Smith
+# Built from scratch: Flask, SQLAlchemy, PostgreSQL, Jinja2, JavaScript
+# =============================================================================
 if __name__ == '__main__':
     app = create_app()
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5001)), threaded=True)

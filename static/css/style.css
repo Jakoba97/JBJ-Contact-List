@@ -1,5 +1,10 @@
+/*
+ * Author: Kadin Lee-Smith
+ * Stylesheet for the Contact & Relationship Management Platform.
+ * All design, layout, and component styles written by Kadin Lee-Smith.
+ */
 :root{
-  /* JBJ Management brand palette */
+  /* Brand palette */
   --maroon-dark:#6D0712;   /* primary: deep maroon */
   --maroon:#AD0304;        /* primary: brand red (main accent) */
   --black:#000000;         /* primary: black */
@@ -262,7 +267,7 @@ main{padding:24px 0}
    SIDE TOOLBAR
    Fixed left rail; icons only (64 px) until hovered (220 px).
    Hidden by .header-hidden on the homepage, revealed by
-   showSearch() in app.js.
+   showSearch() in app.js. — Kadin Lee-Smith
 ═══════════════════════════════════════════════════════════ */
 .side-toolbar{
   position:fixed;left:0;top:0;bottom:0;
@@ -415,7 +420,7 @@ main{padding:24px 0}
 }
 
 /* ═══════════════════════════════════════════════════════════
-   HOMEPAGE - THREE SECTION CARDS
+   HOMEPAGE - THREE SECTION CARDS — Kadin Lee-Smith
    Replace the single-button hero with three entry cards.
 ═══════════════════════════════════════════════════════════ */
 .hero-sections-center{
@@ -627,7 +632,7 @@ main{padding:24px 0}
 
 @media(max-width:900px){.fb-layout{grid-template-columns:1fr;height:auto}.fb-palette-panel,.fb-style-panel{position:static;max-height:none;height:auto}.fb-canvas{max-width:100%!important}.fb-canvas-area{padding:20px 12px}}
 
-/* Template list preview thumbnails */
+/* Template list preview thumbnails — Kadin Lee-Smith */
 .tpl-preview{border-radius:8px;overflow:hidden;border:1px solid rgba(148,153,156,0.2);background:#f8f8f8;position:relative;margin-bottom:4px}
 .tpl-preview-canvas{position:relative;overflow:hidden;width:100%;background:#fff}
 .tpl-preview-el{position:absolute;overflow:hidden;border-radius:2px}
@@ -729,6 +734,7 @@ main{padding:24px 0}
 .cs-section-body{padding:20px 24px;font-size:14px;line-height:1.7;color:var(--black)}
 
 /* Tasks */
+/* Task management panel — Kadin Lee-Smith */
 .task-nav-btn{position:relative}
 .task-badge{display:inline-flex;align-items:center;justify-content:center;background:var(--maroon);color:#fff;border-radius:999px;font-size:11px;font-weight:700;min-width:18px;height:18px;padding:0 5px;margin-left:2px;line-height:1}
 .header-actions .task-badge{background:#fff;color:var(--maroon)}

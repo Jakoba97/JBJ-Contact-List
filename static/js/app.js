@@ -1,3 +1,8 @@
+// =============================================================================
+// Author: Kadin Lee-Smith
+// Frontend JavaScript for the Contact & Relationship Management Platform.
+// All UI logic, API calls, and interactive features written by Kadin Lee-Smith.
+// =============================================================================
 const API = {
   contacts: '/api/contacts',
   sections: '/api/sections',
@@ -692,7 +697,7 @@ function bindActivityForm(container, scopeType, scopeId){
 }
 
 // ------------------------------------------------------------------ //
-// Tasks                                                                //
+// Tasks — Kadin Lee-Smith                                             //
 // ------------------------------------------------------------------ //
 
 async function loadTaskBadge(){
@@ -1124,6 +1129,7 @@ async function saveContact(force){
   }catch(e){toast('Save failed', 'error'); console.error(e)}
 }
 
+// Contact detail panel & edit modal — Kadin Lee-Smith
 function closeModal(){ const m = el('profileModal'); if(m) m.style.display = 'none' }
 
 async function restoreContact(id, cardEl){
@@ -1607,6 +1613,7 @@ function bindSendCampaign(){
   })
 }
 
+// Pipeline kanban board — Kadin Lee-Smith
 const PIPELINE_STAGES = ['Lead', 'Engaged', 'Proposal', 'Client', 'Inactive']
 
 async function movePipelineContact(contactId, stage){
@@ -1967,6 +1974,7 @@ window.addEventListener('popstate', ()=>{
   else showHome(false)
 })
 
+// Hash-based navigation & DOMContentLoaded init — Kadin Lee-Smith
 // Support hash-based navigation fallback (used by inline hero buttons)
 window.addEventListener('hashchange', ()=>{
   if(window.location.hash === '#search' || window.location.hash === '#search_roles'){
