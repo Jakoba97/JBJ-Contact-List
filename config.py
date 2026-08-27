@@ -28,9 +28,3 @@ class Config:
     SESSION_COOKIE_SECURE = bool(os.environ.get("RENDER"))
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
-
-    LINKEDIN_CLIENT_ID = os.environ.get("LINKEDIN_CLIENT_ID", "")
-    LINKEDIN_CLIENT_SECRET = os.environ.get("LINKEDIN_CLIENT_SECRET", "")
-    FACEBOOK_APP_ID = os.environ.get("FACEBOOK_APP_ID", "")
-    FACEBOOK_APP_SECRET = os.environ.get("FACEBOOK_APP_SECRET", "")
-    APP_BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:5050")

@@ -10,23 +10,17 @@ const API = {
   tags: '/api/tags',
   sectionCategories: '/api/section-categories',
   counties: '/api/counties',
+  contactOrganizations: '/api/contact-organizations',
+  groups: '/api/groups',
 }
 
-let state = { page: 1, limit: 25, q: '', tags: [], counties: [], followup: '', favoritesOnly: false, incompleteOnly: false, total: 0, view: 'people', selectedKey: null, layout: 'grid', showDeleted: false }
+let state = { page: 1, limit: 25, q: '', tags: [], counties: [], organizations: [], followup: '', favoritesOnly: false, total: 0, view: 'people', selectedKey: null, showDeleted: false }
 
-// Clicking a card a second time hides the detail panel instead of leaving
-// it open forever -- this is also what drives the "selected card" highlight
-// (Gmail-style) since both need to track which card is currently open.
+// Tracks which row is currently highlighted (Gmail-style) as its detail
+// modal is open -- purely visual, the modal itself is closed with its own X.
 function selectCard(key, cardEl, openFn){
-  const panel = el('contactDetail')
-  if(state.selectedKey === key){
-    state.selectedKey = null
-    if(panel) panel.style.display = 'none'
-    document.querySelectorAll('.card.selected').forEach(c=>c.classList.remove('selected'))
-    return
-  }
   state.selectedKey = key
-  document.querySelectorAll('.card.selected').forEach(c=>c.classList.remove('selected'))
+  document.querySelectorAll('.card.selected, .contacts-table tr.selected').forEach(c=>c.classList.remove('selected'))
   if(cardEl) cardEl.classList.add('selected')
   openFn()
 }
@@ -110,7 +104,7 @@ console.debug('app.js loaded')
 // before opening one keeps only one open at a time. (Tags/Counties live
 // permanently in the sidebar in this layout, not as popovers.)
 function closeOtherFilterMenus(exceptId){
-  ;['exportMenu', 'toolsMenu'].forEach(id => {
+  ;['exportMenu', 'toolsMenu', 'filterMenu'].forEach(id => {
     if(id === exceptId) return
     const m = el(id)
     if(m) m.style.display = 'none'
@@ -159,20 +153,6 @@ async function fetchTagOptions(){
   }catch(e){console.warn(e)}
 }
 
-function bindTagFilter(){
-  const btn = el('tagFilterBtn')
-  const menu = el('tagFilterMenu')
-  if(!btn || !menu) return
-  btn.addEventListener('click', (e)=>{
-    e.stopPropagation()
-    const opening = menu.style.display === 'none'
-    closeOtherFilterMenus('tagFilterMenu')
-    menu.style.display = opening ? '' : 'none'
-  })
-  menu.addEventListener('click', (e)=> e.stopPropagation())
-  document.addEventListener('click', ()=>{ menu.style.display = 'none' })
-}
-
 function updateCountyFilterLabel(){
   const label = el('countyFilterLabel')
   if(!label) return
@@ -209,45 +189,99 @@ async function fetchCounties(){
   }catch(e){console.warn(e)}
 }
 
-function bindCountyFilter(){
-  const btn = el('countyFilterBtn')
-  const menu = el('countyFilterMenu')
+function updateOrgFilterLabel(){
+  const label = el('orgFilterLabel')
+  if(!label) return
+  label.textContent = state.organizations.length ? `(${state.organizations.length} selected)` : ''
+}
+
+// Organization filter only applies to the People view -- Organizations view
+// already lists one row per organization, so filtering by organization
+// there would just be a text search, not a category filter.
+async function fetchContactOrganizations(){
+  const menu = el('orgFilterMenu')
+  if(!menu) return
+  try{
+    const res = await fetch(API.contactOrganizations)
+    const names = await res.json()
+    if(!names.length){
+      menu.innerHTML = '<div class="filter-menu-empty">No organizations on file yet.</div>'
+      updateOrgFilterLabel()
+      return
+    }
+    menu.innerHTML = names.map(name => `
+      <label class="filter-option">
+        <input type="checkbox" value="${name}" ${state.organizations.includes(name) ? 'checked' : ''}>
+        <span>${name}</span>
+      </label>
+    `).join('')
+    menu.querySelectorAll('input[type=checkbox]').forEach(cb => {
+      cb.addEventListener('change', ()=>{
+        if(cb.checked){
+          if(!state.organizations.includes(cb.value)) state.organizations.push(cb.value)
+        } else {
+          state.organizations = state.organizations.filter(o => o !== cb.value)
+        }
+        updateOrgFilterLabel()
+      })
+    })
+    updateOrgFilterLabel()
+  }catch(e){console.warn(e)}
+}
+
+function activeFilterCount(){
+  return state.tags.length + state.counties.length + state.organizations.length
+    + (state.followup ? 1 : 0) + (state.favoritesOnly ? 1 : 0)
+}
+
+function updateFilterCountBadge(){
+  const badge = el('filterCountBadge')
+  if(!badge) return
+  const count = activeFilterCount()
+  badge.textContent = count
+  badge.style.display = count ? '' : 'none'
+}
+
+function bindFilterMenu(){
+  const btn = el('filterMenuBtn')
+  const menu = el('filterMenu')
   if(!btn || !menu) return
   btn.addEventListener('click', (e)=>{
     e.stopPropagation()
     const opening = menu.style.display === 'none'
-    closeOtherFilterMenus('countyFilterMenu')
+    closeOtherFilterMenus('filterMenu')
     menu.style.display = opening ? '' : 'none'
   })
   menu.addEventListener('click', (e)=> e.stopPropagation())
   document.addEventListener('click', ()=>{ menu.style.display = 'none' })
+
+  const applyBtn = el('applyFiltersBtn')
+  if(applyBtn) applyBtn.addEventListener('click', ()=>{
+    updateFilterCountBadge()
+    menu.style.display = 'none'
+    state.page = 1
+    search()
+  })
+
+  const clearBtn = el('clearFiltersBtn')
+  if(clearBtn) clearBtn.addEventListener('click', ()=>{
+    state.tags = []; state.counties = []; state.organizations = []; state.followup = ''; state.favoritesOnly = false
+    const favCb = el('favoritesOnlyCheckbox'); if(favCb) favCb.checked = false
+    const allRadio = document.querySelector('input[name=followupRadio][value=""]'); if(allRadio) allRadio.checked = true
+    fetchTagOptions(); fetchCounties(); fetchContactOrganizations()
+    updateFilterCountBadge()
+    state.page = 1
+    search()
+  })
 }
 
 async function fetchStats(){
   try{
     const res = await fetch(API.stats)
     const json = await res.json()
-    if(el('statTotalLabel')) el('statTotalLabel').textContent = 'Total Contacts'
-    if(el('statIncompleteLabel')) el('statIncompleteLabel').textContent = 'Need Review'
     el('statTotal').textContent = (json.total ?? 0).toLocaleString()
-    if(el('statIncomplete')) el('statIncomplete').textContent = (json.incomplete ?? 0).toLocaleString()
-    if(el('statOrgsCard')) el('statOrgsCard').style.display = ''
-    if(el('statCompleteCard')) el('statCompleteCard').style.display = ''
     if(el('statOrgs')) el('statOrgs').textContent = (json.organizations ?? 0).toLocaleString()
-    if(el('statComplete')) el('statComplete').textContent = (json.complete_pct ?? 0) + '%'
-  }catch(e){console.warn(e)}
-}
-
-async function fetchSectionStats(){
-  try{
-    const res = await fetch('/api/section-stats')
-    const json = await res.json()
-    if(el('statTotalLabel')) el('statTotalLabel').textContent = 'Total Organizations'
-    if(el('statIncompleteLabel')) el('statIncompleteLabel').textContent = 'No Contact on File'
-    el('statTotal').textContent = (json.total ?? 0).toLocaleString()
-    if(el('statIncomplete')) el('statIncomplete').textContent = (json.no_contact ?? 0).toLocaleString()
-    if(el('statOrgsCard')) el('statOrgsCard').style.display = 'none'
-    if(el('statCompleteCard')) el('statCompleteCard').style.display = 'none'
+    if(el('statGroups')) el('statGroups').textContent = (json.groups ?? 0).toLocaleString()
   }catch(e){console.warn(e)}
 }
 
@@ -272,87 +306,42 @@ function tagHue(tag){
   return `hsl(${hue},50%,35%)`
 }
 
-function renderCard(c){
-  const div = document.createElement('div')
+// Single-line-per-contact table row -- Name/Organization/Title/Phone/Email,
+// plus a toggleable favorite star. Clicking the name opens the full detail
+// modal (contact info, tags, and the outreach activity log).
+function renderContactTableRow(c){
   const key = 'contact:'+c.id
-  div.className = 'card' + (state.selectedKey === key ? ' selected' : '')
-  div.tabIndex = 0
-
-  const lastContacted = relativeDays(c.last_contacted_on)
-  const lastEmailed   = relativeDays(c.last_emailed_on)
-  const recencyBits   = []
-  if(lastContacted) recencyBits.push(`<span class="recency-item"><i class="fas fa-comment-dots recency-icon"></i>${lastContacted}</span>`)
-  if(lastEmailed)   recencyBits.push(`<span class="recency-item"><i class="fas fa-envelope recency-icon"></i>${lastEmailed}</span>`)
-  const recencyHtml = recencyBits.length ? `<div class="card-recency">${recencyBits.join('')}</div>` : ''
-
-  const tagColor = tagHue(c.tag)
-  div.style.borderTopColor = tagColor || ''
-
-  div.innerHTML = `
-    <div class="card-top">
-      <div class="avatar md" style="${tagColor ? `background:linear-gradient(140deg,${tagColor}cc,${tagColor}88)` : ''}">
-        ${initials(c.first_name, c.last_name)}
-      </div>
-      <div class="card-info">
-        <h3 class="card-name">${c.first_name||''} ${c.last_name||''}</h3>
-        ${c.organization ? `<div class="card-org"><i class="fas fa-building"></i> ${c.organization}</div>` : ''}
-        ${c.title ? `<div class="card-role">${c.title}</div>` : ''}
-      </div>
+  const tr = document.createElement('tr')
+  tr.className = state.selectedKey === key ? 'selected' : ''
+  const phone = c.phone_office || c.phone_cell || ''
+  tr.innerHTML = `
+    <td class="col-star">
       <button class="favorite-btn${c.is_favorite? ' is-favorite':''}" title="${c.is_favorite? 'Unstar' : 'Star this contact'}" aria-pressed="${c.is_favorite? 'true':'false'}">
         <i class="${c.is_favorite? 'fas':'far'} fa-star"></i>
       </button>
-    </div>
-    <div class="card-meta-row">
-      ${c.tag ? `<span class="card-tag-pill" style="${tagColor ? `background:${tagColor}18;color:${tagColor};border-color:${tagColor}40` : ''}">${c.tag}</span>` : ''}
-      ${c.county ? `<span class="card-county"><i class="fas fa-location-dot"></i> ${c.county}</span>` : ''}
-      ${scoreBadgeHtml(c.score)}
-    </div>
-    ${recencyHtml}
-    <div class="card-actions">
-      ${state.showDeleted
-        ? `<button class="btn btn-sm restore-btn"><i class="fas fa-rotate-left"></i> Restore</button><button class="btn btn-sm btn-danger purge-btn"><i class="fas fa-trash"></i> Delete Forever</button>`
-        : `<button class="btn btn-sm view-btn"><i class="fas fa-eye"></i> View</button><button class="btn btn-sm edit-btn"><i class="fas fa-pen"></i> Edit</button>`
-      }
-    </div>
+    </td>
+    <td><a href="#" class="contact-name-link">${c.first_name||''} ${c.last_name||''}</a></td>
+    <td>${c.organization || '<span class="muted">-</span>'}</td>
+    <td>${c.title || '<span class="muted">-</span>'}</td>
+    <td>${phone || '<span class="muted">-</span>'}</td>
+    <td>${c.email ? `<a href="mailto:${c.email}">${c.email}</a>` : '<span class="muted">-</span>'}</td>
+    ${state.showDeleted ? `<td class="col-actions">
+      <button class="btn btn-sm restore-btn"><i class="fas fa-rotate-left"></i> Restore</button>
+      <button class="btn btn-sm btn-danger purge-btn"><i class="fas fa-trash"></i> Delete Forever</button>
+    </td>` : ''}
   `
-  div.addEventListener('click', (ev)=>{
-    if(ev.target && ev.target.closest('.edit-btn, .favorite-btn, .restore-btn, .purge-btn')) return
-    if(!state.showDeleted) selectCard(key, div, ()=> showContactDetail(c))
+  tr.addEventListener('click', (ev)=>{
+    if(ev.target && ev.target.closest('.contact-name-link')) ev.preventDefault()
+    if(ev.target && ev.target.closest('.favorite-btn, .restore-btn, .purge-btn')) return
+    if(!state.showDeleted) selectCard(key, tr, ()=> showContactDetail(c))
   })
-  const editBtn = div.querySelector('.edit-btn')
-  if(editBtn) editBtn.addEventListener('click', (e)=>{ e.stopPropagation(); openProfile(c.id) })
-  const favoriteBtn = div.querySelector('.favorite-btn')
+  const favoriteBtn = tr.querySelector('.favorite-btn')
   if(favoriteBtn) favoriteBtn.addEventListener('click', (e)=>{ e.stopPropagation(); toggleFavorite(c, favoriteBtn) })
-  const restoreBtn = div.querySelector('.restore-btn')
-  if(restoreBtn) restoreBtn.addEventListener('click', (e)=>{ e.stopPropagation(); restoreContact(c.id, div) })
-  const purgeBtn = div.querySelector('.purge-btn')
-  if(purgeBtn) purgeBtn.addEventListener('click', (e)=>{ e.stopPropagation(); purgeContact(c.id, div) })
-  return div
-}
-
-function renderRow(c) {
-  const key = 'contact:' + c.id
-  const row = document.createElement('div')
-  row.className = 'list-row' + (state.selectedKey === key ? ' selected' : '')
-  const tagColor = tagHue(c.tag)
-  const avatarStyle = tagColor ? `background:linear-gradient(140deg,${tagColor}cc,${tagColor}88)` : ''
-  row.innerHTML = `
-    <div class="list-avatar" style="${avatarStyle}">${initials(c.first_name, c.last_name)}</div>
-    <div class="list-name">${c.first_name || ''} ${c.last_name || ''}</div>
-    <div class="list-org">${c.organization || '<span style="color:#ccc">-</span>'}</div>
-    <div class="list-title">${c.title || '<span style="color:#ccc">-</span>'}</div>
-    <div>${c.tag ? `<span class="list-tag" style="${tagColor ? `background:${tagColor}18;color:${tagColor};border-color:${tagColor}40` : ''}">${c.tag}</span>` : ''}</div>
-    <div class="list-actions">
-      <button class="btn btn-sm view-btn"><i class="fas fa-eye"></i> View</button>
-      <button class="btn btn-sm edit-btn"><i class="fas fa-pen"></i> Edit</button>
-    </div>
-  `
-  row.addEventListener('click', (ev) => {
-    if (ev.target && ev.target.closest('.edit-btn')) return
-    selectCard(key, row, () => showContactDetail(c))
-  })
-  row.querySelector('.edit-btn').addEventListener('click', (e) => { e.stopPropagation(); openProfile(c.id) })
-  return row
+  const restoreBtn = tr.querySelector('.restore-btn')
+  if(restoreBtn) restoreBtn.addEventListener('click', (e)=>{ e.stopPropagation(); restoreContact(c.id, tr) })
+  const purgeBtn = tr.querySelector('.purge-btn')
+  if(purgeBtn) purgeBtn.addEventListener('click', (e)=>{ e.stopPropagation(); purgeContact(c.id, tr) })
+  return tr
 }
 
 async function toggleFavorite(c, btnEl){
@@ -367,8 +356,8 @@ async function toggleFavorite(c, btnEl){
     btnEl.querySelector('i').className = next ? 'fas fa-star' : 'far fa-star'
     btnEl.title = next ? 'Unstar' : 'Star this contact'
     btnEl.setAttribute('aria-pressed', next ? 'true' : 'false')
-    const card = btnEl.closest('.card')
-    if(state.favoritesOnly && !next && card) card.remove()
+    const row = btnEl.closest('.card, tr')
+    if(state.favoritesOnly && !next && row) row.remove()
   }catch(e){ toast('Could not reach the server.', 'error'); console.error(e) }
 }
 
@@ -379,8 +368,7 @@ async function deleteContact(c){
     const res = await fetch(`/api/contacts/${c.id}`, { method: 'DELETE' })
     if(!res.ok){ toast('Could not delete this contact.', 'error'); return }
     state.selectedKey = null
-    const panel = el('contactDetail')
-    if(panel) panel.style.display = 'none'
+    closeModal()
     toast('Contact deleted')
     search()
     fetchStats()
@@ -426,37 +414,26 @@ function renderOrgCard(item){
   return div
 }
 
-function renderOrgRow(item) {
-  const key = 'org:' + item.organization
-  const row = document.createElement('div')
-  row.className = 'list-row' + (state.selectedKey === key ? ' selected' : '')
-  const tagColor = tagHue(item.tag)
-  const avatarStyle = tagColor ? `background:linear-gradient(140deg,${tagColor}cc,${tagColor}88)` : ''
-  if (tagColor) row.style.borderLeft = `3px solid ${tagColor}`
-  row.innerHTML = `
-    <div class="list-avatar" style="${avatarStyle}">${(item.organization || '?').charAt(0).toUpperCase()}</div>
-    <div class="list-name">${item.organization || ''}</div>
-    <div class="list-org">
-      ${tagColor ? `<span class="list-tag" style="background:${tagColor}18;color:${tagColor};border-color:${tagColor}40">${item.tag}</span>` : ''}
-      <span style="margin-left:${tagColor ? '6px' : '0'}">${item.contact_count || 0} contact${item.contact_count === 1 ? '' : 's'}</span>
+function renderGroupCard(g){
+  const div = document.createElement('div')
+  const key = 'group:'+g.id
+  div.className = 'card' + (state.selectedKey === key ? ' selected' : '')
+  div.tabIndex = 0
+  div.innerHTML = `
+    <div class="card-top">
+      <div class="avatar md"><i class="fas fa-layer-group"></i></div>
+      <div>
+        <h3>${g.name||''}</h3>
+        <div class="meta">${g.contact_count||0} contact${g.contact_count===1?'':'s'}</div>
+      </div>
     </div>
-    <div class="list-title">${item.notes ? item.notes.replace(/\|\|/g, ', ') : '<span style="color:#ccc">-</span>'}</div>
-    <div></div>
-    <div class="list-actions">
-      <button class="btn btn-sm view-btn"><i class="fas fa-eye"></i></button>
-      <a href="/organizations/${encodeURIComponent(item.organization)}" class="btn btn-sm" style="text-decoration:none;" title="Open full page"><i class="fas fa-arrow-up-right-from-square"></i></a>
-      <button class="btn btn-sm add-btn"><i class="fas fa-plus"></i></button>
+    ${g.description ? `<div class="category">${g.description}</div>` : '<div class="muted">No description</div>'}
+    <div class="card-actions" style="margin-top:8px;display:flex;gap:8px;">
+      <button class="btn btn-sm view-btn"><i class="fas fa-eye"></i> View</button>
     </div>
   `
-  row.addEventListener('click', (ev) => {
-    if (ev.target && ev.target.closest('.add-btn')) return
-    selectCard(key, row, () => showOrgDetail(item))
-  })
-  row.querySelector('.add-btn').addEventListener('click', (e) => {
-    e.stopPropagation()
-    openProfile(null, { organization: item.organization, tag: item.tag || '' })
-  })
-  return row
+  div.addEventListener('click', ()=>{ selectCard(key, div, ()=> showGroupDetail(g.id)) })
+  return div
 }
 
 async function showContactDetail(contact){
@@ -466,7 +443,7 @@ async function showContactDetail(contact){
       const res = await fetch('/api/contacts/' + encodeURIComponent(contact))
       c = await res.json()
     }
-    const panel = el('contactDetail')
+    const panel = el('modalBody')
     if(!panel) return
     const incomplete = ((!c.email || c.email.trim()==='') && (!c.phone_office && !c.phone_cell))
     const hasNotes = c.notes && c.notes.trim().length>0
@@ -479,7 +456,7 @@ async function showContactDetail(contact){
           <div class="detail-row"><strong>Email:</strong> ${c.email? `<a href="mailto:${c.email}">${c.email}</a>` : '<span class="muted">No email</span>'}</div>
           <div class="detail-row"><strong>Phone:</strong> ${c.phone_office? `<a href="tel:${c.phone_office}">${c.phone_office}</a>` : (c.phone_cell? `<a href="tel:${c.phone_cell}">${c.phone_cell}</a>` : '<span class="muted">No phone</span>')}</div>
           <div class="detail-row"><strong>County:</strong> ${c.county || '<span class="muted">Unknown</span>'}</div>
-          ${c.tag ? `<div class="detail-row"><strong>Category:</strong> ${pillHtml(c.tag,'small')}</div>` : ''}
+          <div class="detail-row"><strong>Tag:</strong> ${c.tag ? pillHtml(c.tag,'small') : '<span class="muted">No tag assigned</span>'}</div>
           ${(()=>{
             const lists = c.lists||[]
             if(!lists.length) return ''
@@ -506,16 +483,13 @@ async function showContactDetail(contact){
           </div>
           ${pipelineStageSectionHtml(c.pipeline_stage || '')}
           ${taskSectionHtml()}
-          <div class="email-stats-section detail-section"></div>
           ${activitySectionHtml()}
         </div>
       </div>
     `
-    panel.style.display = ''
+    const modal = el('profileModal')
+    if(modal) modal.style.display = ''
     panel.scrollTop = 0
-    // On desktop the panel is sticky so it's always visible - no scroll needed.
-    // On mobile it stacks below the results, so scroll it into view.
-    if(window.innerWidth < 768) panel.scrollIntoView({ behavior: 'smooth', block: 'start' })
     const edit = el('detailEditBtn'); if(edit) edit.addEventListener('click', ()=> openProfile(c.id))
     const favBtn = el('detailFavoriteBtn'); if(favBtn) favBtn.addEventListener('click', ()=> toggleFavorite(c, favBtn))
     const deleteBtn = el('detailDeleteBtn'); if(deleteBtn) deleteBtn.addEventListener('click', ()=> deleteContact(c))
@@ -527,8 +501,6 @@ async function showContactDetail(contact){
     const taskContainer = panel.querySelector('.task-section-inline')
     loadContactTaskSection(taskContainer, c.id)
     bindContactTaskForm(taskContainer, c.id)
-    const emailStatsContainer = panel.querySelector('.email-stats-section')
-    if(emailStatsContainer) loadEmailStats(emailStatsContainer, c.id)
     const activityContainer = panel.querySelector('.activity-section')
     loadActivitySection(activityContainer, 'contact', c.id)
     bindActivityForm(activityContainer, 'contact', c.id)
@@ -538,7 +510,7 @@ async function showContactDetail(contact){
 // Org-level detail: full contact list (each clickable into their own detail
 // or edit), notes, last-touched date, and the shared outreach-activity log.
 function showOrgDetail(item){
-  const panel = el('contactDetail')
+  const panel = el('modalBody')
   if(!panel) return
   const contacts = item.contacts || []
   const contactsHtml = contacts.length
@@ -574,7 +546,8 @@ function showOrgDetail(item){
       </div>
     </div>
   `
-  panel.style.display = ''
+  const modal = el('profileModal')
+  if(modal) modal.style.display = ''
   const addBtn = el('detailAddContactBtn')
   if(addBtn) addBtn.addEventListener('click', ()=> openProfile(null, {organization: item.organization, tag: item.tag||''}))
   panel.querySelectorAll('.view-person-btn').forEach(b=> b.addEventListener('click', ()=> showContactDetail(parseInt(b.dataset.id,10))))
@@ -582,6 +555,215 @@ function showOrgDetail(item){
   const activityContainer = panel.querySelector('.activity-section')
   loadActivitySection(activityContainer, 'org', item.organization)
   bindActivityForm(activityContainer, 'org', item.organization)
+}
+
+// Groups: a hand-picked list of contacts with a name + description.
+// Membership is managed right in the detail view -- search-and-add plus a
+// remove button per member -- rather than through the contact's own record.
+async function showGroupDetail(groupId){
+  try{
+    const res = await fetch(`/api/groups/${groupId}`)
+    if(!res.ok){ toast('Could not load group.', 'error'); return }
+    const g = await res.json()
+    const panel = el('modalBody')
+    if(!panel) return
+    const members = g.contacts || []
+    const membersHtml = members.length
+      ? `<div class="org-contact-list">${members.map(c=>`
+          <div class="org-contact-item">
+            <div class="org-contact-info">
+              <div class="avatar sm">${initials(c.first_name, c.last_name)}</div>
+              <div class="org-contact-text">
+                <div class="pc-name">${(c.first_name||'')+' '+(c.last_name||'')}</div>
+                <div class="pc-meta">${c.title||''}${c.organization? ' • '+c.organization : ''}</div>
+              </div>
+            </div>
+            <div class="org-contact-actions">
+              <button class="btn btn-sm view-person-btn" data-id="${c.id}"><i class="fas fa-eye"></i> View</button>
+              <button class="btn btn-sm btn-danger remove-member-btn" data-id="${c.id}"><i class="fas fa-xmark"></i> Remove</button>
+            </div>
+          </div>
+        `).join('')}</div>`
+      : '<div class="muted">No contacts in this group yet.</div>'
+    panel.innerHTML = `
+      <div class="detail-card">
+        <div class="detail-photo photo-placeholder"><i class="fas fa-layer-group"></i></div>
+        <div class="detail-main">
+          <h2>${g.name||''}</h2>
+          <div class="detail-sub">${g.contact_count||0} contact${g.contact_count===1?'':'s'}</div>
+          <div class="detail-notes">${g.description ? `<div class="notes">${g.description.replace(/\n/g,'<br>')}</div>` : '<span class="muted">No description</span>'}</div>
+          <div class="detail-flags" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button id="groupEditBtn" class="btn"><i class="fas fa-pen"></i> Edit</button>
+            <button id="groupDeleteBtn" class="btn" style="color:#9b1c1c;"><i class="fas fa-trash"></i> Delete Group</button>
+            ${window.CAN_EXPORT ? `
+            <div class="export-wrap">
+              <button id="groupExportMenuBtn" class="btn"><i class="fas fa-download"></i> Export <i class="fas fa-chevron-down" style="font-size:11px;"></i></button>
+              <div id="groupExportMenu" class="export-menu" style="display:none;">
+                <button id="groupExportCopyEmails" class="export-menu-item"><i class="fas fa-envelope"></i> Copy Emails (for mass email)</button>
+                <button id="groupExportCsvBtn" class="export-menu-item"><i class="fas fa-file-csv"></i> Download CSV</button>
+                <button id="groupExportDocxBtn" class="export-menu-item"><i class="fas fa-file-word"></i> Download Word Doc</button>
+              </div>
+            </div>` : ''}
+          </div>
+          <h4 class="detail-section-title" style="margin-top:14px;"><i class="fas fa-users"></i> Members</h4>
+          ${membersHtml}
+          <div class="group-add-member" style="margin-top:10px;position:relative;">
+            <input id="groupAddContactInput" type="text" placeholder="Search contacts to add…" autocomplete="off" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1px solid rgba(148,153,156,0.4);font-family:inherit;font-size:14px;" />
+            <div id="groupAddContactResults" class="pipeline-search-results" style="display:none;"></div>
+          </div>
+        </div>
+      </div>
+    `
+    const modal = el('profileModal')
+    if(modal) modal.style.display = ''
+    panel.scrollTop = 0
+    el('groupEditBtn').addEventListener('click', ()=> openGroupForm(g.id))
+    el('groupDeleteBtn').addEventListener('click', ()=> deleteGroup(g))
+    panel.querySelectorAll('.view-person-btn').forEach(b=> b.addEventListener('click', ()=> showContactDetail(parseInt(b.dataset.id,10))))
+    panel.querySelectorAll('.remove-member-btn').forEach(b=> b.addEventListener('click', async ()=>{
+      await fetch(`/api/groups/${g.id}/contacts/${b.dataset.id}`, {method:'DELETE'})
+      showGroupDetail(g.id)
+      if(state.view === 'groups') search()
+    }))
+    bindGroupAddContactPicker(g.id)
+    bindGroupExportMenu(g.id)
+  }catch(e){ console.error(e); toast('Could not load group.', 'error') }
+}
+
+function bindGroupExportMenu(groupId){
+  const btn = el('groupExportMenuBtn')
+  const menu = el('groupExportMenu')
+  if(!btn || !menu) return
+  btn.addEventListener('click', (e)=>{
+    e.stopPropagation()
+    const opening = menu.style.display === 'none'
+    menu.style.display = opening ? '' : 'none'
+  })
+  menu.addEventListener('click', (e)=> e.stopPropagation())
+  document.addEventListener('click', ()=>{ menu.style.display = 'none' })
+
+  const copyBtn = el('groupExportCopyEmails')
+  if(copyBtn) copyBtn.addEventListener('click', async ()=>{
+    menu.style.display = 'none'
+    try{
+      const res = await fetch(`/api/export/emails?group_id=${groupId}`)
+      const j = await res.json()
+      if(!j.emails || j.emails.length === 0){ toast('No emails found in this group.', 'error'); return }
+      await navigator.clipboard.writeText(j.joined)
+      toast(`Copied ${j.count} email address${j.count===1?'':'es'} to clipboard`)
+    }catch(e){ toast('Could not copy emails', 'error'); console.error(e) }
+  })
+
+  const csvBtn = el('groupExportCsvBtn')
+  if(csvBtn) csvBtn.addEventListener('click', ()=>{
+    menu.style.display = 'none'
+    window.location.href = `/api/export?group_id=${groupId}`
+  })
+
+  const docxBtn = el('groupExportDocxBtn')
+  if(docxBtn) docxBtn.addEventListener('click', ()=>{
+    menu.style.display = 'none'
+    window.location.href = `/api/export/docx?group_id=${groupId}`
+  })
+}
+
+function bindGroupAddContactPicker(groupId){
+  const input = el('groupAddContactInput')
+  const results = el('groupAddContactResults')
+  if(!input || !results) return
+  let timer = null
+  input.addEventListener('input', ()=>{
+    clearTimeout(timer)
+    const q = input.value.trim()
+    if(!q){ results.style.display = 'none'; results.innerHTML = ''; return }
+    timer = setTimeout(async ()=>{
+      try{
+        const res = await fetch(`/api/contacts?q=${encodeURIComponent(q)}&limit=8`)
+        const j = await res.json()
+        const contacts = j.contacts || []
+        if(!contacts.length){
+          results.innerHTML = '<div class="filter-menu-empty">No matching contacts.</div>'
+          results.style.display = ''
+          return
+        }
+        results.innerHTML = contacts.map(c => `
+          <div class="pipeline-search-result" data-id="${c.id}" style="cursor:pointer;">
+            <div class="pipeline-search-result-name">${c.first_name||''} ${c.last_name||''}</div>
+            ${c.organization ? `<div class="pipeline-search-result-org">${c.organization}</div>` : ''}
+          </div>
+        `).join('')
+        results.style.display = ''
+        results.querySelectorAll('.pipeline-search-result').forEach(row => {
+          row.addEventListener('click', async ()=>{
+            await fetch(`/api/groups/${groupId}/contacts`, {
+              method: 'POST', headers: {'Content-Type':'application/json'},
+              body: JSON.stringify({contact_id: parseInt(row.dataset.id, 10)})
+            })
+            input.value = ''
+            results.style.display = 'none'
+            showGroupDetail(groupId)
+            if(state.view === 'groups') search()
+          })
+        })
+      }catch(e){ console.error(e) }
+    }, 250)
+  })
+}
+
+async function deleteGroup(g){
+  if(!confirm(`Delete the group "${g.name}"? This does not delete the contacts in it.`)) return
+  try{
+    const res = await fetch(`/api/groups/${g.id}`, {method:'DELETE'})
+    if(!res.ok){ toast('Could not delete group.', 'error'); return }
+    closeModal()
+    toast('Group deleted')
+    state.page = 1
+    search()
+  }catch(e){ toast('Could not reach the server.', 'error'); console.error(e) }
+}
+
+async function openGroupForm(id){
+  let g = {id: null, name: '', description: ''}
+  if(id){
+    const res = await fetch(`/api/groups/${id}`)
+    g = await res.json()
+  }
+  const body = el('modalBody')
+  body.innerHTML = `
+    <h2>${id? 'Edit Group' : 'New Group'}</h2>
+    <form id="groupForm" class="modal-form">
+      <label>Group name<br><input id="gf_name" value="${g.name||''}" /></label>
+      <label>Description<br><textarea id="gf_description" rows="3">${g.description||''}</textarea></label>
+      <div id="groupFormError" class="flag flag-warn" style="display:none;margin-top:10px;"></div>
+      <div style="margin-top:10px">
+        <button id="saveGroupBtn" type="button" class="btn btn-primary"><i class="fas fa-check"></i> Save</button>
+        <button id="closeGroupModalBtn" type="button" class="btn">Close</button>
+      </div>
+    </form>
+  `
+  const modal = el('profileModal')
+  if(modal) modal.style.display = ''
+  el('closeGroupModalBtn').addEventListener('click', closeModal)
+  el('saveGroupBtn').addEventListener('click', async ()=>{
+    const name = el('gf_name').value.trim()
+    const description = el('gf_description').value.trim()
+    const errEl = el('groupFormError')
+    errEl.style.display = 'none'
+    if(!name){ errEl.textContent = 'Group name is required.'; errEl.style.display = ''; return }
+    try{
+      const res = await fetch(id ? `/api/groups/${id}` : '/api/groups', {
+        method: id ? 'PUT' : 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name, description}),
+      })
+      const j = await res.json()
+      if(!res.ok){ errEl.textContent = j.error || 'Could not save group.'; errEl.style.display = ''; return }
+      state.page = 1
+      search()
+      showGroupDetail(j.id)
+      toast('Saved')
+    }catch(e){ errEl.textContent = 'Could not reach the server.'; errEl.style.display = ''; console.error(e) }
+  })
 }
 
 // Outreach history shared by the Contacts detail panel and the Organizations
@@ -630,27 +812,6 @@ function activityUrl(scopeType, scopeId){
   return scopeType === 'contact'
     ? `/api/contacts/${encodeURIComponent(scopeId)}/activity`
     : `/api/organizations/${encodeURIComponent(scopeId)}/activity`
-}
-
-async function loadEmailStats(container, contactId){
-  if(!container) return
-  try{
-    const res  = await fetch(`/api/contacts/${contactId}/email-events`)
-    const data = await res.json()
-    const s    = data.summary || {}
-    if(!Object.keys(s).length){ container.innerHTML = ''; return }
-    const opens  = s.open  || 0
-    const clicks = s.click || 0
-    const rows = [
-      opens  ? `<span><i class="fas fa-envelope-open" style="color:var(--blue);"></i> ${opens} open${opens!==1?'s':''}</span>` : '',
-      clicks ? `<span><i class="fas fa-arrow-pointer" style="color:var(--green);"></i> ${clicks} click${clicks!==1?'s':''}</span>` : '',
-    ].filter(Boolean).join('  ·  ')
-    if(!rows){ container.innerHTML = ''; return }
-    container.innerHTML = `
-      <h4 class="detail-section-title"><i class="fas fa-chart-line"></i> Email Engagement</h4>
-      <div style="font-size:13px;display:flex;gap:14px;flex-wrap:wrap;">${rows}</div>
-    `
-  }catch(e){ container.innerHTML = '' }
 }
 
 async function loadActivitySection(container, scopeType, scopeId){
@@ -971,37 +1132,35 @@ async function search(){
   const mySeq = ++searchSeq
   const out = el('results')
   out.innerHTML = '<div>Loading…</div>'
-  if(state.view === 'organizations') fetchSectionStats(); else fetchStats()
+  fetchStats()
   const params = new URLSearchParams({page: state.page, limit: state.limit})
   if(state.q) params.set('q', state.q)
   if(state.tags.length) params.set('tag', state.tags.join(','))
   if(state.counties.length) params.set('county', state.counties.join(','))
+  if(state.view !== 'organizations' && state.organizations.length) params.set('organization', state.organizations.join(','))
   if(state.view !== 'organizations' && state.followup) params.set('followup', state.followup)
   if(state.view !== 'organizations' && state.favoritesOnly) params.set('favorites_only', '1')
-  if(state.view !== 'organizations' && state.incompleteOnly) params.set('incomplete_only', '1')
   if(state.showDeleted) params.set('show_deleted', '1')
   try{
-    if(state.view === 'organizations'){
+    if(state.view === 'groups'){
+      const res = await fetch(API.groups + '?' + params.toString())
+      const j = await res.json()
+      if(mySeq !== searchSeq) return
+      out.innerHTML = ''
+      state.total = j.total || 0
+      if(!j.groups || j.groups.length === 0){ out.innerHTML = '<div>No groups yet. Click "New Group" to create one.</div>'; renderPagination(state.total); return }
+      out.className = 'results-grid'
+      j.groups.forEach(g => out.appendChild(renderGroupCard(g)))
+      renderPagination(state.total)
+    } else if(state.view === 'organizations'){
       const res = await fetch(API.sections + '?' + params.toString())
       const j = await res.json()
       if(mySeq !== searchSeq) return
       out.innerHTML = ''
       state.total = j.total || 0
       if(!j.organizations || j.organizations.length === 0){ out.innerHTML = '<div>No organizations found</div>'; renderPagination(state.total); return }
-      if(state.layout === 'list'){
-        out.className = 'results-list-wrap'
-        const list = document.createElement('div')
-        list.className = 'results-list'
-        const header = document.createElement('div')
-        header.className = 'list-header'
-        header.innerHTML = '<span></span><span>Organization</span><span>Contacts</span><span>Notes</span><span></span><span></span>'
-        list.appendChild(header)
-        j.organizations.forEach(item => list.appendChild(renderOrgRow(item)))
-        out.appendChild(list)
-      } else {
-        out.className = 'results-grid'
-        j.organizations.forEach(item => out.appendChild(renderOrgCard(item)))
-      }
+      out.className = 'results-grid'
+      j.organizations.forEach(item => out.appendChild(renderOrgCard(item)))
       renderPagination(state.total)
     } else {
       const res = await fetch(API.contacts + '?' + params.toString())
@@ -1010,20 +1169,26 @@ async function search(){
       out.innerHTML = ''
       state.total = j.total || 0
       if(!j.contacts || j.contacts.length===0){ out.innerHTML = '<div>No results</div>'; renderPagination(state.total); return }
-      if(state.layout === 'list'){
-        out.className = 'results-list-wrap'
-        const list = document.createElement('div')
-        list.className = 'results-list'
-        const header = document.createElement('div')
-        header.className = 'list-header'
-        header.innerHTML = '<span></span><span>Name</span><span>Organization</span><span>Title</span><span>Tag</span><span></span>'
-        list.appendChild(header)
-        j.contacts.forEach(c => list.appendChild(renderRow(c)))
-        out.appendChild(list)
-      } else {
-        out.className = 'results-grid'
-        j.contacts.forEach(c => out.appendChild(renderCard(c)))
-      }
+      out.className = 'contacts-table-wrap'
+      const table = document.createElement('table')
+      table.className = 'contacts-table'
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th class="col-star"></th>
+            <th>Name</th>
+            <th>Organization</th>
+            <th>Title</th>
+            <th>Phone</th>
+            <th>Email</th>
+            ${state.showDeleted ? '<th>Actions</th>' : ''}
+          </tr>
+        </thead>
+        <tbody></tbody>
+      `
+      const tbody = table.querySelector('tbody')
+      j.contacts.forEach(c => tbody.appendChild(renderContactTableRow(c)))
+      out.appendChild(table)
       renderPagination(state.total)
     }
   }catch(e){ if(mySeq===searchSeq) out.innerHTML = '<div>Error loading results</div>'; console.error(e) }
@@ -1120,11 +1285,11 @@ async function saveContact(force){
       toast(msg, 'error')
       return
     }
-    closeModal()
     fetchTagOptions()
+    fetchContactOrganizations()
     state.page = 1
     search()
-    if(j && j.id) showContactDetail(j.id)
+    if(j && j.id) showContactDetail(j.id); else closeModal()
     toast('Saved')
   }catch(e){toast('Save failed', 'error'); console.error(e)}
 }
@@ -1158,23 +1323,34 @@ function switchView(view, userInitiated){
     state.page = 1
     state.tags = []
   }
-  const peopleBtn = el('viewPeopleBtn'); const orgBtn = el('viewOrgBtn'); const delBtn = el('viewDeletedBtn')
+  const peopleBtn = el('viewPeopleBtn'); const orgBtn = el('viewOrgBtn'); const groupsBtn = el('viewGroupsBtn'); const delBtn = el('viewDeletedBtn')
   if(peopleBtn) peopleBtn.classList.toggle('active', view === 'people')
   if(orgBtn) orgBtn.classList.toggle('active', view === 'organizations')
+  if(groupsBtn) groupsBtn.classList.toggle('active', view === 'groups')
   if(delBtn) delBtn.classList.toggle('active', view === 'deleted')
   // Follow-up status is tracked per-Contact, not per-Organization, so the
   // filter doesn't apply (but isn't reset) when browsing Organizations.
   document.querySelectorAll('input[name=followupRadio]').forEach(r => { r.disabled = (view === 'organizations') })
   const favoritesOnlyCheckbox = el('favoritesOnlyCheckbox')
   if(favoritesOnlyCheckbox) favoritesOnlyCheckbox.disabled = (view === 'organizations')
+  const orgFilterSection = el('orgFilterSection')
+  if(orgFilterSection) orgFilterSection.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.disabled = (view === 'organizations') })
+  // Filters/Export/Trash don't apply to Groups (it's not a filtered contact
+  // list) -- New Group only makes sense there.
+  const filterWrap = el('filterMenuWrap'); const exportWrap = el('exportMenuWrap'); const newGroupBtn = el('newGroupBtn')
+  if(filterWrap) filterWrap.style.display = (view === 'groups') ? 'none' : ''
+  if(exportWrap) exportWrap.style.display = (view === 'groups') ? 'none' : ''
+  if(delBtn) delBtn.style.display = (view === 'groups') ? 'none' : ''
+  if(newGroupBtn) newGroupBtn.style.display = (view === 'groups') ? '' : 'none'
   const si = el('searchInput')
-  if(si) si.placeholder = view === 'people'
-    ? 'Search by Name, Organization, Title, or Email...'
+  if(si) si.placeholder = view === 'people' ? 'Search by Name, Organization, Title, or Email...'
+    : view === 'groups' ? 'Search by group name or description...'
     : 'Search by Organization or Category...'
   if(userInitiated && changed){
-    history.pushState({page: view === 'organizations' ? 'search_roles' : 'search'}, '', view === 'organizations' ? '#search_roles' : '#search')
+    const hash = view === 'organizations' ? '#search_roles' : view === 'groups' ? '#groups' : '#search'
+    history.pushState({page: hash.slice(1)}, '', hash)
   }
-  fetchTagOptions()
+  if(view !== 'groups') fetchTagOptions()
   search()
 }
 
@@ -1184,25 +1360,14 @@ function bind(){
 
   const viewPeopleBtn = el('viewPeopleBtn')
   const viewOrgBtn = el('viewOrgBtn')
+  const viewGroupsBtn = el('viewGroupsBtn')
   if(viewPeopleBtn) viewPeopleBtn.addEventListener('click', ()=> switchView('people', true))
   if(viewOrgBtn) viewOrgBtn.addEventListener('click', ()=> switchView('organizations', true))
+  if(viewGroupsBtn) viewGroupsBtn.addEventListener('click', ()=> switchView('groups', true))
   const viewDeletedBtn = el('viewDeletedBtn')
   if(viewDeletedBtn) viewDeletedBtn.addEventListener('click', ()=> switchView('deleted', true))
-
-  const layoutGridBtn = el('layoutGridBtn')
-  const layoutListBtn = el('layoutListBtn')
-  if(layoutGridBtn) layoutGridBtn.addEventListener('click', () => {
-    state.layout = 'grid'
-    layoutGridBtn.classList.add('active')
-    layoutListBtn.classList.remove('active')
-    search()
-  })
-  if(layoutListBtn) layoutListBtn.addEventListener('click', () => {
-    state.layout = 'list'
-    layoutListBtn.classList.add('active')
-    layoutGridBtn.classList.remove('active')
-    search()
-  })
+  const newGroupBtn = el('newGroupBtn')
+  if(newGroupBtn) newGroupBtn.addEventListener('click', ()=> openGroupForm(null))
 
   document.querySelectorAll('input[name=followupRadio]').forEach(r => {
     r.addEventListener('change', ()=>{ if(r.checked) state.followup = r.value })
@@ -1211,18 +1376,6 @@ function bind(){
   const favoritesOnlyCheckbox = el('favoritesOnlyCheckbox')
   if(favoritesOnlyCheckbox) favoritesOnlyCheckbox.addEventListener('change', ()=>{
     state.favoritesOnly = favoritesOnlyCheckbox.checked
-  })
-
-  const applyFiltersBtn = el('applyFiltersBtn')
-  if(applyFiltersBtn) applyFiltersBtn.addEventListener('click', ()=>{ state.page = 1; search() })
-
-  const incompleteCard = el('statIncompleteCard')
-  if(incompleteCard) incompleteCard.addEventListener('click', ()=>{
-    state.incompleteOnly = !state.incompleteOnly
-    incompleteCard.style.outline = state.incompleteOnly ? '2px solid var(--amber, #f59e0b)' : ''
-    el('statIncompleteLabel').textContent = state.incompleteOnly ? 'Need Review (filtered)' : 'Need Review'
-    state.page = 1
-    search()
   })
 
   // keyboard shortcuts: Ctrl+K and '/' -- but not while typing in a field,
@@ -1244,18 +1397,84 @@ function bind(){
   el('closeModal').addEventListener('click', closeModal)
   const addBtn = el('addContactBtn')
   if(addBtn) addBtn.addEventListener('click', ()=>{ openProfile(null) })
+  const addGroupBtn = el('addGroupBtn')
+  if(addGroupBtn) addGroupBtn.addEventListener('click', ()=>{ openGroupForm(null) })
   const backBtn = el('backHomeBtn')
   if(backBtn) backBtn.addEventListener('click', ()=>{ showHome(true) })
   bindExportMenu()
   bindToolsMenu()
   bindDraftEmail()
-  bindSendCampaign()
   bindPipeline()
   bindCreateFlyer()
-  bindCountyFilter()
-  bindTagFilter()
+  bindFilterMenu()
   bindAdminMenu()
   bindTasksPanel()
+  bindAddOrg()
+}
+
+function bindAddOrg(){
+  const btn = el('addOrgBtn')
+  const modal = el('addOrgModal')
+  if(!btn || !modal) return
+
+  let tagsLoaded = false
+  const loadTagOptions = async ()=>{
+    if(tagsLoaded) return
+    const list = el('addOrgTagOptions')
+    if(!list) return
+    try{
+      const res = await fetch(API.sectionCategories)
+      const tags = await res.json()
+      ;(tags || []).forEach(tag=>{
+        const opt = document.createElement('option')
+        opt.value = tag
+        list.appendChild(opt)
+      })
+      tagsLoaded = true
+    }catch(e){ console.error(e) }
+  }
+
+  btn.addEventListener('click', ()=>{
+    el('addOrgName').value = ''
+    el('addOrgTag').value = ''
+    el('addOrgNotes').value = ''
+    el('addOrgStatus').style.display = 'none'
+    loadTagOptions()
+    modal.style.display = ''
+    el('addOrgName').focus()
+  })
+
+  el('closeAddOrgModal').addEventListener('click', ()=>{ modal.style.display = 'none' })
+  el('closeAddOrgBtn').addEventListener('click', ()=>{ modal.style.display = 'none' })
+
+  el('addOrgSaveBtn').addEventListener('click', async ()=>{
+    const organization = el('addOrgName').value.trim()
+    const tag = el('addOrgTag').value.trim()
+    const notes = el('addOrgNotes').value.trim()
+    const statusEl = el('addOrgStatus')
+    statusEl.style.display = 'none'
+    if(!organization){ statusEl.textContent = 'Organization name is required.'; statusEl.style.display = ''; return }
+    const saveBtn = el('addOrgSaveBtn')
+    saveBtn.disabled = true
+    try{
+      const res = await fetch(API.sections, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ organization, tag, notes })
+      })
+      const j = await res.json()
+      if(!res.ok){ statusEl.textContent = j.error || 'Could not add organization.'; statusEl.style.display = ''; return }
+      toast('Organization added.')
+      modal.style.display = 'none'
+      if(state.view === 'organizations') search()
+    }catch(e){
+      statusEl.textContent = 'Could not reach the server.'
+      statusEl.style.display = ''
+      console.error(e)
+    }finally{
+      saveBtn.disabled = false
+    }
+  })
 }
 
 // The Admin nav dropdown is a native <details>/<summary> (no JS needed to
@@ -1404,7 +1623,6 @@ function bindDraftEmail(){
     el('draftEmailStatus').textContent = 'Drafting…'
     el('draftEmailOutput').style.display = 'none'
     el('draftEmailCopyBtn').style.display = 'none'
-    if(el('draftEmailOpenBuilderBtn')) el('draftEmailOpenBuilderBtn').style.display = 'none'
     try{
       const res = await fetch('/api/draft-email', {
         method: 'POST',
@@ -1425,7 +1643,6 @@ function bindDraftEmail(){
       el('draftEmailOutput').value = j.draft || ''
       el('draftEmailOutput').style.display = ''
       el('draftEmailCopyBtn').style.display = ''
-      if(el('draftEmailOpenBuilderBtn')) el('draftEmailOpenBuilderBtn').style.display = ''
       el('draftEmailStatus').textContent = `Drafted for ${j.recipient_count} recipient${j.recipient_count===1?'':'s'}.`
     }catch(e){
       el('draftEmailStatus').textContent = 'Could not reach the server.'
@@ -1440,176 +1657,6 @@ function bindDraftEmail(){
       await navigator.clipboard.writeText(el('draftEmailOutput').value)
       el('draftEmailStatus').textContent = 'Copied to clipboard.'
     }catch(e){ el('draftEmailStatus').textContent = 'Could not copy.' }
-  })
-
-  if(el('draftEmailOpenBuilderBtn')){
-    el('draftEmailOpenBuilderBtn').addEventListener('click', async ()=>{
-      const raw = el('draftEmailOutput').value.trim()
-      if(!raw) return
-      const lines = raw.split('\n')
-      let subject = ''
-      let bodyStart = 0
-      const subjectLine = lines.find((l, i) => { bodyStart = i; return l.toLowerCase().startsWith('subject:') })
-      if(subjectLine){ subject = subjectLine.replace(/^subject:\s*/i, '').trim(); bodyStart++ }
-      while(bodyStart < lines.length && lines[bodyStart].trim() === '') bodyStart++
-      const bodyText = lines.slice(bodyStart).join('\n').trim()
-      const bodyHtml = bodyText.split(/\n\n+/).map(p => `<p>${p.replace(/\n/g,'<br>')}</p>`).join('')
-      el('draftEmailOpenBuilderBtn').disabled = true
-      el('draftEmailStatus').textContent = 'Opening in Email Builder…'
-      try{
-        const res = await fetch('/api/email-templates', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({
-            name: subject || 'AI Draft',
-            subject,
-            blocks: [{ id: 'body', type: 'richtext', html: bodyHtml }]
-          })
-        })
-        const t = await res.json()
-        if(!res.ok){ el('draftEmailStatus').textContent = t.error || 'Could not create template.'; return }
-        window.location.href = `/email-builder/${t.id}`
-      }catch(e){
-        el('draftEmailStatus').textContent = 'Could not open Email Builder.'
-      }finally{
-        el('draftEmailOpenBuilderBtn').disabled = false
-      }
-    })
-  }
-}
-
-function bindSendCampaign(){
-  const openBtn = el('sendCampaignBtn')
-  const modal   = el('campaignModal')
-  if(!openBtn || !modal) return
-
-  function currentFilterParams(){
-    const p = new URLSearchParams()
-    if(state.q) p.set('q', state.q)
-    if(state.tags.length) p.set('tag', state.tags.join(','))
-    if(state.counties.length) p.set('county', state.counties.join(','))
-    if(state.followup) p.set('followup', state.followup)
-    if(state.favoritesOnly) p.set('favorites_only', 'true')
-    return p
-  }
-
-  async function loadCampaignPreview(){
-    const aud = el('campaignAudience')
-    if(!aud) return
-    aud.textContent = 'Counting recipients…'
-    try{
-      const res = await fetch('/api/campaign/preview?' + currentFilterParams())
-      const json = await res.json()
-      const n = json.recipient_count || 0
-      const snd = el('campaignSendBtn')
-      if(n === 0){
-        aud.textContent = 'No contacts with email addresses match the current filter.'
-        if(snd) snd.textContent = 'Send (0 recipients)'
-      } else {
-        const sample = (json.sample || []).join(', ')
-        aud.textContent = `Will send to ${n} contact${n===1?'':'s'}${sample ? ' - e.g. ' + sample : ''}.`
-        if(snd) snd.textContent = `Send to ${n} contact${n===1?'':'s'}`
-      }
-    }catch(e){ if(el('campaignAudience')) el('campaignAudience').textContent = 'Could not count recipients.' }
-  }
-
-  openBtn.addEventListener('click', async ()=>{
-    // Reset to step 1
-    const s1 = el('campaignStep1'); const s2 = el('campaignStep2')
-    if(s1) s1.style.display = ''
-    if(s2) s2.style.display = 'none'
-    const p = el('campaignPrompt'); if(p) p.value = ''
-    const gs = el('campaignGenStatus'); if(gs) gs.textContent = ''
-    const ss = el('campaignSendStatus'); if(ss) ss.textContent = ''
-    modal.style.display = ''
-    loadCampaignPreview()
-    // Populate case study dropdown (same as draft email)
-    try{
-      const r = await fetch('/api/case-studies')
-      const cs = (await r.json()).case_studies || []
-      const sel = el('campaignCaseStudy')
-      if(sel){
-        sel.innerHTML = '<option value="">None</option>'
-        cs.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.title; sel.appendChild(o) })
-      }
-    }catch(e){}
-  })
-
-  el('closeCampaignModal').addEventListener('click', ()=>{ modal.style.display = 'none' })
-  modal.addEventListener('click', e=>{ if(e.target===modal) modal.style.display='none' })
-
-  el('campaignGenerateBtn').addEventListener('click', async ()=>{
-    const prompt = (el('campaignPrompt').value || '').trim()
-    if(!prompt){ toast('Describe what the email is about.', 'error'); return }
-    const gs = el('campaignGenStatus'); gs.textContent = 'Generating draft…'
-    el('campaignGenerateBtn').disabled = true
-    try{
-      const params = Object.fromEntries(currentFilterParams())
-      const res = await fetch('/api/draft-email', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({
-          prompt,
-          case_study_id: el('campaignCaseStudy').value || null,
-          ...params,
-        })
-      })
-      const json = await res.json()
-      if(!res.ok){ gs.textContent = json.error || 'Could not generate draft.'; return }
-
-      // Parse "Subject: ..." line from draft
-      const draft = json.draft || ''
-      const lines = draft.split('\n')
-      let subject = '', bodyLines = []
-      let pastSubject = false
-      for(const line of lines){
-        if(!pastSubject && line.toLowerCase().startsWith('subject:')){
-          subject = line.replace(/^subject:\s*/i, '').trim()
-          pastSubject = true
-        } else if(pastSubject || subject){
-          bodyLines.push(line)
-        } else {
-          bodyLines.push(line)
-        }
-      }
-      const body = bodyLines.join('\n').replace(/^\n+/, '')
-
-      el('campaignSubject').value = subject
-      el('campaignBody').value = body
-      el('campaignStep1').style.display = 'none'
-      el('campaignStep2').style.display = ''
-      gs.textContent = ''
-    }catch(e){ gs.textContent = 'Error generating draft.' }
-    finally{ el('campaignGenerateBtn').disabled = false }
-  })
-
-  el('campaignBackBtn').addEventListener('click', ()=>{
-    el('campaignStep1').style.display = ''
-    el('campaignStep2').style.display = 'none'
-    el('campaignSendStatus').textContent = ''
-  })
-
-  el('campaignSendBtn').addEventListener('click', async ()=>{
-    const subject = (el('campaignSubject').value || '').trim()
-    const body    = (el('campaignBody').value || '').trim()
-    if(!subject){ toast('Add a subject line before sending.', 'error'); return }
-    if(!body){ toast('The email body is empty.', 'error'); return }
-    const ss = el('campaignSendStatus')
-    ss.textContent = 'Sending…'
-    el('campaignSendBtn').disabled = true
-    try{
-      const params = Object.fromEntries(currentFilterParams())
-      const res = await fetch('/api/campaign/send', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({subject, body, ...params})
-      })
-      const json = await res.json()
-      if(!res.ok){ ss.textContent = json.error || 'Send failed.'; return }
-      modal.style.display = 'none'
-      toast(`Campaign sent: ${json.sent} delivered, ${json.failed} failed.`)
-    }catch(e){ ss.textContent = 'Send failed - check your connection.' }
-    finally{ el('campaignSendBtn').disabled = false }
   })
 }
 
@@ -1824,7 +1871,6 @@ function bindCreateFlyer(){
     el('createFlyerOutput').style.display = 'none'
     el('createFlyerOutput').src = ''
     el('createFlyerDownloadBtn').style.display = 'none'
-    if(el('createFlyerOpenBuilderBtn')) el('createFlyerOpenBuilderBtn').style.display = 'none'
     el('createFlyerStatus').textContent = ''
     modal.style.display = ''
     el('createFlyerPrompt').focus()
@@ -1845,7 +1891,6 @@ function bindCreateFlyer(){
     el('createFlyerStatus').textContent = 'Generating…'
     el('createFlyerOutput').style.display = 'none'
     el('createFlyerDownloadBtn').style.display = 'none'
-    if(el('createFlyerOpenBuilderBtn')) el('createFlyerOpenBuilderBtn').style.display = 'none'
     try{
       const res = await fetch('/api/generate-flyer', {
         method: 'POST',
@@ -1854,12 +1899,10 @@ function bindCreateFlyer(){
       })
       const j = await res.json()
       if(!res.ok){ el('createFlyerStatus').textContent = j.error || 'Could not generate the image.'; return }
-      window._lastFlyerResult = j
       el('createFlyerOutput').src = j.image
       el('createFlyerOutput').style.display = ''
       el('createFlyerDownloadBtn').href = j.image
       el('createFlyerDownloadBtn').style.display = ''
-      if(el('createFlyerOpenBuilderBtn')) el('createFlyerOpenBuilderBtn').style.display = ''
       el('createFlyerStatus').textContent = `Headline: "${j.headline}"`
     }catch(e){
       el('createFlyerStatus').textContent = 'Could not reach the server.'
@@ -1868,59 +1911,16 @@ function bindCreateFlyer(){
       genBtn.disabled = false
     }
   })
-
-  if(el('createFlyerOpenBuilderBtn')){
-    el('createFlyerOpenBuilderBtn').addEventListener('click', async ()=>{
-      if(!window._lastFlyerResult) return
-      const { raw_background, headline, body, format: genFmt } = window._lastFlyerResult
-      const prompt = el('createFlyerPrompt').value.trim()
-      // Map generate-flyer format names to flyer builder format names
-      const builderFormat = genFmt === 'portrait' ? 'flyer' : 'square'
-      // Canvas display dims for element positioning
-      const dims = { flyer: {w:408,h:528}, square: {w:540,h:540} }
-      const {w, h} = dims[builderFormat] || dims['square']
-      el('createFlyerOpenBuilderBtn').disabled = true
-      el('createFlyerStatus').textContent = 'Opening in Flyer Builder…'
-      try{
-        // Upload the raw background (no baked-in text/logo)
-        const res = await fetch(raw_background)
-        const blob = await res.blob()
-        const fd = new FormData()
-        fd.append('file', blob, 'ai-bg.png')
-        const assetRes = await fetch('/api/flyer-assets', { method: 'POST', body: fd })
-        if(!assetRes.ok){ el('createFlyerStatus').textContent = 'Could not upload image.'; return }
-        const asset = await assetRes.json()
-        // Build editable elements: logo + headline + body text
-        const uid = () => Math.random().toString(36).slice(2,9)
-        const elements = [
-          { id: uid(), type: 'logo', x: 20, y: 20, width: Math.round(w*0.35), height: Math.round(w*0.12), opacity: 100 },
-          { id: uid(), type: 'heading', x: 20, y: Math.round(h*0.72), width: w-40, height: Math.round(h*0.14), text: headline || 'Heading', fontSize: builderFormat==='flyer'?28:36, color: '#ffffff', bold: true, align: 'left', opacity: 100 },
-          ...(body ? [{ id: uid(), type: 'text', x: 20, y: Math.round(h*0.86), width: w-40, height: Math.round(h*0.1), text: body, fontSize: builderFormat==='flyer'?14:16, color: '#f0f0f0', bold: false, align: 'left', opacity: 100 }] : []),
-        ]
-        const tplRes = await fetch('/api/flyer-templates', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ name: prompt || 'AI Flyer', format: builderFormat, elements, background: '#000000', bg_asset_id: asset.id })
-        })
-        if(!tplRes.ok){ el('createFlyerStatus').textContent = 'Could not create flyer.'; return }
-        const tpl = await tplRes.json()
-        window.location.href = `/flyer-builder/${tpl.id}`
-      }catch(e){
-        el('createFlyerStatus').textContent = 'Could not open Flyer Builder.'
-        console.error(e)
-      }finally{
-        el('createFlyerOpenBuilderBtn').disabled = false
-      }
-    })
-  }
 }
 
 window.addEventListener('load', async ()=>{
   bind();
   loadTaskBadge();
   await fetchCounties();
-  if(window.location.hash === '#search' || window.location.hash === '#search_roles'){
-    const view = window.location.hash === '#search_roles' ? 'organizations' : 'people'
+  await fetchContactOrganizations();
+  if(['#search', '#search_roles', '#groups'].includes(window.location.hash)){
+    const view = window.location.hash === '#search_roles' ? 'organizations'
+      : window.location.hash === '#groups' ? 'groups' : 'people'
     showSearch(false, true, view)
   } else {
     showHome(false)
@@ -1932,13 +1932,11 @@ function showHome(push=true){
   const headerHidden = document.querySelectorAll('.header-hidden')
   const results = el('results')
   const pagination = document.querySelector('.pagination')
-  const detail = el('contactDetail')
   const appMain = el('appMain')
   const mainContent = el('mainContent')
   if(hero) hero.style.display = ''
   headerHidden.forEach(n=> { n.classList.add('header-hidden'); n.style.display = 'none' })
   if(results) results.style.display = 'none'
-  if(detail) detail.style.display = 'none'
   if(pagination) pagination.style.display = 'none'
   if(mainContent) mainContent.style.display = 'none'
   if(appMain) appMain.classList.remove('has-toolbar')
@@ -1952,7 +1950,6 @@ function showSearch(push=true, focus=true, view='people'){
   const headerHidden = document.querySelectorAll('.header-hidden')
   const results = el('results')
   const pagination = document.querySelector('.pagination')
-  const detail = el('contactDetail')
   const appMain = el('appMain')
   const mainContent = el('mainContent')
   if(hero) hero.style.display = 'none'
@@ -1960,16 +1957,19 @@ function showSearch(push=true, focus=true, view='people'){
   if(mainContent) mainContent.style.display = ''
   if(results) results.style.display = ''
   if(pagination) pagination.style.display = ''
-  if(detail) detail.style.display = 'none'
   if(appMain) appMain.classList.add('has-toolbar')
   switchView(view, false)
-  if(push) history.pushState({page: view === 'organizations' ? 'search_roles' : 'search'}, '', view === 'organizations' ? '#search_roles' : '#search')
+  if(push){
+    const hash = view === 'organizations' ? '#search_roles' : view === 'groups' ? '#groups' : '#search'
+    history.pushState({page: hash.slice(1)}, '', hash)
+  }
   if(focus){ const si = el('searchInput'); if(si) si.focus() }
 }
 
 window.addEventListener('popstate', ()=>{
   const hash = window.location.hash
   if(hash === '#search_roles'){ showSearch(false,false,'organizations') }
+  else if(hash === '#groups'){ showSearch(false,false,'groups') }
   else if(hash === '#search'){ showSearch(false,false,'people') }
   else showHome(false)
 })

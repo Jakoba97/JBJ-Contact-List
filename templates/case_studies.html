@@ -21,35 +21,14 @@
 </head>
 <body>
 
-  <!-- ── Proposal Manager side toolbar ───────────────────────── -->
   <nav class="side-toolbar" id="sideToolbar">
     <div class="toolbar-logo-wrap">
       <div class="toolbar-logo-img" style="background:#fff;border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:0.75rem;color:#AD0304;font-weight:700;letter-spacing:0.05em;">CRM</div>
-      
-      <span class="toolbar-brand-text">Proposals</span>
+
+      <span class="toolbar-brand-text">CRM</span>
     </div>
 
     <ul class="toolbar-nav-list">
-      <li>
-        <a href="/proposals" class="toolbar-nav-link" title="Hub">
-          <i class="fas fa-table-cells-large"></i>
-          <span class="toolbar-label">Hub</span>
-        </a>
-      </li>
-      <li class="toolbar-divider" aria-hidden="true"></li>
-      <li>
-        <a href="/proposals/new" class="toolbar-nav-link" title="New Proposal">
-          <i class="fas fa-file-circle-plus"></i>
-          <span class="toolbar-label">New Proposal</span>
-        </a>
-      </li>
-      <li>
-        <a href="/proposals" class="toolbar-nav-link" title="All Proposals">
-          <i class="fas fa-folder-open"></i>
-          <span class="toolbar-label">All Proposals</span>
-        </a>
-      </li>
-      <li class="toolbar-divider" aria-hidden="true"></li>
       <li class="toolbar-nav-active">
         <a href="/case-studies" class="toolbar-nav-link" title="Case Studies">
           <i class="fas fa-book-open"></i>
@@ -88,14 +67,6 @@
             <i class="fas fa-address-book"></i>
             <span>Contact Management</span>
           </a>
-          <a href="/email-events" class="top-tab">
-            <i class="fas fa-envelope-open-text"></i>
-            <span>Email &amp; Events</span>
-          </a>
-          <a href="/proposals" class="top-tab top-tab-active">
-            <i class="fas fa-file-contract"></i>
-            <span>Proposal Manager</span>
-          </a>
           {% if current_user.is_admin %}
           <a href="/admin" class="top-tab">
             <i class="fas fa-gear"></i>
@@ -112,7 +83,7 @@
     <!-- Page header -->
     <div class="pm-page-header">
       <div class="pm-page-header-left">
-        <a href="/proposals" class="btn"><i class="fas fa-arrow-left"></i> Back</a>
+        <a href="/" class="btn"><i class="fas fa-arrow-left"></i> Back</a>
         <h1><i class="fas fa-book-open" style="font-size:16px;opacity:0.8;margin-right:4px;"></i> Case Studies</h1>
       </div>
       {% if current_user.is_admin %}

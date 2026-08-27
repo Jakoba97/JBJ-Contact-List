@@ -64,23 +64,6 @@ html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial,Helvetica,sans-
 
 main{padding:24px 0}
 .results-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:24px}
-.results-list-wrap{overflow-x:scroll;border-radius:12px;border:1px solid rgba(148,153,156,0.2);transform:rotateX(180deg)}
-.results-list-wrap::-webkit-scrollbar{height:8px}
-.results-list-wrap::-webkit-scrollbar-track{background:rgba(148,153,156,0.1);border-radius:12px 12px 0 0}
-.results-list-wrap::-webkit-scrollbar-thumb{background:rgba(148,153,156,0.45);border-radius:4px}
-.results-list-wrap::-webkit-scrollbar-thumb:hover{background:rgba(148,153,156,0.7)}
-.results-list{display:flex;flex-direction:column;gap:0;min-width:860px;transform:rotateX(180deg)}
-.list-header{display:grid;grid-template-columns:36px minmax(130px,1.2fr) minmax(110px,1fr) minmax(110px,1fr) 130px 210px;align-items:center;gap:12px;padding:8px 16px;background:#f4f4f4;font-weight:600;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;border-bottom:1px solid rgba(148,153,156,0.2)}
-.list-row{display:grid;grid-template-columns:36px minmax(130px,1.2fr) minmax(110px,1fr) minmax(110px,1fr) 130px 210px;align-items:center;gap:12px;padding:10px 16px;background:#fff;border-bottom:1px solid rgba(148,153,156,0.12);cursor:pointer;transition:background 0.12s}
-.list-row:last-child{border-bottom:none}
-.list-row:hover{background:#f7f7f7}
-.list-row.selected{background:rgba(173,3,4,0.04)}
-.list-avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;background:var(--primary);flex-shrink:0}
-.list-name{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.list-org{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.list-title{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.list-tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid transparent;white-space:nowrap}
-.list-actions{display:flex;gap:6px;justify-content:flex-end}
 .card{background:var(--bg);border-radius:var(--radius);box-shadow:var(--card-shadow);padding:18px;padding-top:16px;display:flex;flex-direction:column;gap:10px;border:1px solid transparent;border-top:3px solid rgba(148,153,156,0.35);transition:transform 0.15s,box-shadow 0.15s,border-color 0.15s,background 0.15s}
 .card:hover{transform:translateY(-3px);box-shadow:0 14px 28px rgba(0,0,0,0.14)}
 .card.selected{border-color:var(--maroon);border-top-color:var(--maroon);background:rgba(214,129,130,0.10);box-shadow:0 6px 20px rgba(173,3,4,0.18)}
@@ -132,8 +115,8 @@ main{padding:24px 0}
 .modal-content h2,.modal-content h3{color:var(--maroon-dark);font-family:var(--font-display);letter-spacing:0.2px}
 .modal .close{position:absolute;right:14px;top:12px;border:0;background:transparent;font-size:24px;color:var(--gray);cursor:pointer;transition:color 0.15s}
 .modal .close:hover{color:var(--maroon)}
-#contactForm label{display:block;margin-bottom:12px;font-weight:600;font-size:13px;color:var(--charcoal)}
-#contactForm input,#contactForm textarea{display:block;width:100%;margin-top:4px;padding:10px 14px;border-radius:12px;border:1px solid rgba(148,153,156,0.5);font-family:inherit;font-size:14px;font-weight:400;box-sizing:border-box}
+#contactForm label,.modal-form label{display:block;margin-bottom:12px;font-weight:600;font-size:13px;color:var(--charcoal)}
+#contactForm input,#contactForm textarea,.modal-form input,.modal-form textarea{display:block;width:100%;margin-top:4px;padding:10px 14px;border-radius:12px;border:1px solid rgba(148,153,156,0.5);font-family:inherit;font-size:14px;font-weight:400;box-sizing:border-box}
 .muted{color:var(--muted);font-size:13px}
 #draftEmailModal textarea{width:100%;border-radius:12px;border:1px solid rgba(148,153,156,0.5);padding:10px 14px;font-family:inherit;font-size:14px}
 #draftEmailModal select{width:100%;margin-top:4px;border-radius:12px;border:1px solid rgba(148,153,156,0.5);padding:10px 14px;font-family:inherit;font-size:14px;background:#fff}
@@ -502,19 +485,34 @@ main{padding:24px 0}
   .photo-placeholder{height:160px}
 }
 
-/* Page layout: filters sidebar + (results/detail). Plain checkbox/radio
-   lists with section headings -- not pill .btn elements -- and an
-   explicit "Apply Filters" action instead of searching on every click,
-   modeled after a simpler content-library-style filter panel. */
-.app-layout{display:grid;grid-template-columns:240px 1fr;gap:24px;align-items:start}
-.filters-sidebar{background:#fff;border-radius:var(--radius);box-shadow:var(--card-shadow);padding:20px;display:flex;flex-direction:column;gap:14px;position:sticky;top:16px;max-height:calc(100vh - 32px)}
-.filters-scroll{overflow-y:auto;flex:1;min-height:0;display:flex;flex-direction:column;gap:18px}
-.filters-title{margin:0;padding-bottom:14px;border-bottom:1px solid rgba(148,153,156,0.3);font-family:var(--font-display);font-weight:400;color:var(--black);font-size:20px}
-.filter-section+.filter-section{border-top:1px solid rgba(148,153,156,0.2);padding-top:16px}
-.filter-section h4{margin:0 0 8px;font-size:14px;font-weight:700;color:var(--black)}
+/* Filter panel: a popover (opened from the toolbar's Filters button)
+   holding plain checkbox/radio lists with section headings -- not pill
+   .btn elements -- and an explicit "Apply" action instead of searching
+   on every click. */
+.filter-menu-panel{width:280px;max-height:70vh;overflow-y:auto;padding:14px}
+.filter-section+.filter-section{border-top:1px solid rgba(148,153,156,0.2);margin-top:14px;padding-top:14px}
+.filter-section h4{margin:0 0 8px;font-size:13px;font-weight:700;color:var(--black)}
 .filter-section h4 .muted{font-weight:400;margin-left:4px}
-.filter-option-list{display:flex;flex-direction:column;max-height:220px;overflow-y:auto}
-.filters-apply-btn{width:100%;justify-content:center;flex-shrink:0}
+.filter-option-list{display:flex;flex-direction:column;max-height:180px;overflow-y:auto}
+.filter-menu-footer{display:flex;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid rgba(148,153,156,0.2)}
+.filter-menu-footer .btn{flex:1;justify-content:center}
+.filter-count-badge{background:var(--maroon);color:#fff;border-radius:999px;font-size:11px;font-weight:700;min-width:16px;height:16px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;margin-left:4px}
+.icon-only-btn{padding-left:10px;padding-right:10px}
+
+/* Full-width, single-line-per-contact table (People view). */
+.contacts-table-wrap{background:#fff;border-radius:var(--radius);box-shadow:var(--card-shadow);overflow-x:auto}
+.contacts-table{width:100%;border-collapse:collapse;font-size:14px}
+.contacts-table thead th{text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted);font-weight:700;padding:12px 14px;border-bottom:1px solid rgba(148,153,156,0.25);white-space:nowrap}
+.contacts-table tbody td{padding:10px 14px;border-bottom:1px solid rgba(148,153,156,0.12);vertical-align:middle}
+.contacts-table tbody tr:last-child td{border-bottom:none}
+.contacts-table tbody tr{cursor:pointer;transition:background 0.12s}
+.contacts-table tbody tr:hover{background:#f7f7f7}
+.contacts-table tbody tr.selected{background:rgba(173,3,4,0.05)}
+.contacts-table .col-star{width:32px;padding-right:0}
+.contacts-table .col-actions{white-space:nowrap}
+.contacts-table .contact-name-link{color:var(--maroon);font-weight:600;text-decoration:none}
+.contacts-table .contact-name-link:hover{text-decoration:underline}
+.contacts-table td .muted{color:var(--gray)}
 
 /* Email builder -- a Gmail/Outlook-style single compose pane: a toolbar
    that runs document.execCommand on the current selection, above one
@@ -641,9 +639,7 @@ main{padding:24px 0}
 .tpl-email-body{font-size:10px;line-height:1.4;color:var(--muted);overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
 .tpl-no-preview{display:flex;align-items:center;justify-content:center;height:60px;color:var(--muted);font-size:12px;gap:6px}
 
-/* Results + Detail layout */
-.results-and-detail{display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start}
-.contact-detail{background:#fff;border-radius:18px;box-shadow:var(--card-shadow);padding:16px;border-top:4px solid var(--maroon);position:sticky;top:80px;max-height:calc(100vh - 100px);overflow-y:auto}
+/* Contact/Organization detail view, rendered inside the shared modal */
 .detail-card{display:flex;flex-direction:column;gap:10px}
 .detail-photo{align-self:center;width:96px;height:96px;border-radius:50%;background:linear-gradient(160deg,var(--charcoal),#1f2122);color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;font-family:var(--font-display);flex-shrink:0}
 .detail-main{width:100%;min-width:0}
@@ -669,16 +665,6 @@ main{padding:24px 0}
 .activity-form{display:flex;flex-direction:column;gap:6px;margin-top:10px}
 .activity-form input,.activity-form select,.activity-form textarea{width:100%;box-sizing:border-box;padding:11px 14px;border-radius:12px;border:1px solid rgba(148,153,156,0.4);font-family:inherit;font-size:15px;min-height:42px}
 .activity-form .activity-log-btn{align-self:flex-start;margin-top:4px}
-
-@media (max-width:900px){
-  .results-and-detail{grid-template-columns:1fr}
-  .contact-detail{order:2}
-}
-
-@media (max-width:760px){
-  .app-layout{grid-template-columns:1fr}
-  .filters-sidebar{position:static;max-height:none}
-}
 
 .analytics-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px}
 .analytics-stat{background:#fff;border-radius:14px;box-shadow:var(--card-shadow);border-top:3px solid var(--rose);padding:16px;display:flex;flex-direction:column;gap:4px;text-align:center}
@@ -836,8 +822,7 @@ body.a11y .card{padding:22px;gap:14px}
 body.a11y .card-name{font-size:18px}
 body.a11y .card-org,.a11y .card-role{font-size:15px}
 body.a11y .card-tag-pill,.a11y .card-county,.a11y .card-recency{font-size:13px}
-body.a11y .list-name{font-size:17px}
-body.a11y .list-org,.a11y .list-title{font-size:15px}
+body.a11y .contacts-table{font-size:16px}
 body.a11y .muted{font-size:15px;color:var(--charcoal)}
 body.a11y input,body.a11y select,body.a11y textarea{font-size:16px;padding:10px 14px}
 body.a11y .detail-section{font-size:16px}
@@ -857,9 +842,6 @@ body.a11y table th,body.a11y table td{padding:12px 14px}
   /* Admin hub grid */
   .admin-hub-grid{grid-template-columns:1fr!important}
 
-  /* Proposal hub grid */
-  .pm-hub-grid{grid-template-columns:1fr!important}
-
   /* Analytics grid */
   .analytics-grid{grid-template-columns:1fr}
 
@@ -871,13 +853,6 @@ body.a11y table th,body.a11y table td{padding:12px 14px}
 
   /* Top tab bar: increase touch targets */
   .top-tab{min-height:44px;padding:0 12px}
-
-  /* Proposal builder two-column → single column */
-  .pb-layout{grid-template-columns:1fr!important;height:auto!important}
-  .pb-cs-panel{position:static!important;max-height:300px;overflow-y:auto}
-
-  /* Recent proposals panel */
-  .pm-recent-panel{position:static!important;left:auto!important;flex-wrap:wrap}
 
   /* Section cards in sequences */
   .seq-card-header{flex-direction:column;align-items:flex-start}

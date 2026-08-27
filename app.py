@@ -7,19 +7,18 @@
 # =============================================================================
 import os                       # lets the app read environment variables (like API keys) from your .env file
 import io                       # handles data in memory, like reading/writing files without saving them to disk first
-import re                       # "regular expressions" - searches for patterns inside text (e.g. find all email addresses)
 import csv                      # lets the app read and write CSV spreadsheet files (like contact exports)
 import threading                # allows multiple tasks to run at the same time in the background
 import uuid as uuid_mod         # generates unique random IDs (like "a3f9b2c1-...") for database records
 from datetime import date, datetime, timedelta  # tools for working with dates and times (today's date, adding 7 days, etc.)
 from dotenv import load_dotenv  # reads your .env file so the app can see your API keys and secrets
-from flask import Flask, request, jsonify, send_file, render_template, render_template_string, redirect, url_for, abort  # Flask is the web framework powering this site; these are its main tools for handling web requests
+from flask import Flask, request, jsonify, send_file, render_template, redirect, url_for, abort  # Flask is the web framework powering this site; these are its main tools for handling web requests
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user  # handles user login sessions (who is logged in, logging in/out, protecting pages that require a login)
 from flask_limiter import Limiter                # rate-limiting tool that blocks someone making too many requests too fast (e.g. brute-force login attempts)
 from flask_limiter.util import get_remote_address  # helper that identifies a visitor by their IP address so rate limiting knows who to track
 from config import Config       # imports your app's settings (database URL, secret key, etc.) from config.py
 from db import db               # your database connection - all contacts, users, emails, etc. are stored and retrieved through this
-from models import Contact, OutreachOrg, Activity, User, AuditLog, CaseStudy, EmailTemplate, FlyerTemplate, FlyerAsset, Task, SocialToken, EmailEvent, AvailabilityRule, Booking, LandingPage, LandingPageSubmission, EmailSequence, EmailSequenceStep, EmailSequenceEnrollment, Proposal, LoginEvent  # imports every database table - each word is one type of record the app can store
+from models import Contact, OutreachOrg, Activity, User, AuditLog, CaseStudy, Task, Group, LoginEvent  # imports every database table - each word is one type of record the app can store
 from schemas import ContactSchema  # defines rules for formatting contact data when sending it to the browser as JSON
 from utils import (              # imports helper functions from utils.py for handling file uploads and data cleanup
     read_uploaded_file, clean_dataframe, clean_outreach_orgs,  # read an uploaded file, clean its data, and clean org import data
@@ -111,7 +110,7 @@ def contact_incomplete_clause():
     return and_(no_email, no_phone)  # a contact is "incomplete" only when email AND all phones are missing
 
 
-def filtered_contacts_query(q=None, tag=None, county=None, contact_id=None, org_tag=None, followup=None, favorites_only=False, incomplete_only=False, show_deleted=False):
+def filtered_contacts_query(q=None, tag=None, county=None, contact_id=None, group_id=None, org_tag=None, organization=None, followup=None, favorites_only=False, incomplete_only=False, show_deleted=False):
     """Shared filter logic for /api/contacts and the export endpoints, so
     exports always match what's currently shown on screen.
 
@@ -133,6 +132,12 @@ def filtered_contacts_query(q=None, tag=None, county=None, contact_id=None, org_
         query = query.filter(Contact.deleted_at.is_(None))    # normal view: only show contacts that are NOT deleted
     if contact_id:                                             # if a specific contact ID was requested...
         query = query.filter(Contact.id == contact_id)        # filter down to just that one contact
+    if group_id:                                               # if scoped to a Group's membership...
+        group = Group.query.get(group_id)                     # look up the group
+        member_ids = (group.contact_ids or []) if group else []  # its list of member contact IDs (empty if the group doesn't exist)
+        if not member_ids:                                     # no members (or no such group) -- return zero results
+            return query.filter(False)
+        query = query.filter(Contact.id.in_(member_ids))      # only keep contacts that are members of this group
     if q:                                                      # if there is a search term typed in the search box...
         like = f"%{q}%"                                        # wrap the search term with % wildcards (matches anywhere in the field)
         full_name = func.coalesce(Contact.first_name, '') + ' ' + func.coalesce(Contact.last_name, '')  # combine first and last name into one searchable field
@@ -153,6 +158,10 @@ def filtered_contacts_query(q=None, tag=None, county=None, contact_id=None, org_
         if not org_names:                                      # if no organizations match those tags, return zero results
             return query.filter(False)
         query = query.filter(func.lower(Contact.organization).in_(org_names))  # only keep contacts whose organization is in that list
+    if organization:                                           # if one or more specific organization names are selected...
+        orgs = [o.lower() for o in split_multi(organization)]  # split into a list and lowercase for case-insensitive matching
+        if orgs:
+            query = query.filter(func.lower(Contact.organization).in_(orgs))  # only keep contacts at one of those organizations
     if county:                                                 # if a county filter is selected...
         counties = split_multi(county)                         # split into a list of county names
         clause = county_filter_clause(counties)                # build the flexible county matching rule (handles "Dallas, Tarrant" combos)
@@ -205,6 +214,10 @@ ACTION_LABELS = {                                              # maps internal a
     'contact_created': 'Added contact',
     'contact_updated': 'Edited contact',
     'contact_deleted': 'Deleted contact',
+    'organization_created': 'Added organization',
+    'group_created': 'Created group',
+    'group_updated': 'Edited group',
+    'group_deleted': 'Deleted group',
     'spreadsheet_sync': 'Synced spreadsheet',
     'user_created': 'Created user login',
     'password_reset': 'Reset password for',
@@ -212,14 +225,6 @@ ACTION_LABELS = {                                              # maps internal a
     'case_study_updated': 'Edited case study',
     'case_study_deleted': 'Deleted case study',
     'case_study_uploaded': 'Uploaded case study file(s)',
-    'email_template_created': 'Created email template',
-    'email_template_updated': 'Edited email template',
-    'email_template_deleted': 'Deleted email template',
-    'email_template_sent': 'Sent email',
-    'flyer_template_created': 'Created flyer',
-    'flyer_template_updated': 'Edited flyer',
-    'flyer_template_deleted': 'Deleted flyer',
-    'flyer_template_sent': 'Sent flyer',
 }
 
 
@@ -245,10 +250,6 @@ def format_audit_details(action, details):
     if action == 'case_study_uploaded':                        # for case study uploads, show how many files and their names
         titles = d.get('titles') or []
         return f"{d.get('count', len(titles))} file(s): {', '.join(titles[:5])}{'...' if len(titles) > 5 else ''}"  # cap at first 5 titles to keep it readable
-    if action == 'email_template_sent':                        # for sent emails, show who it was sent to and how many attachments
-        attachment_count = d.get('attachment_count', 0)
-        suffix = f" with {attachment_count} attachment(s)" if attachment_count else ''
-        return f"To: {d.get('to', '')}{suffix}"
     return ''                                                  # for any other action type with no special formatting, return blank
 
 
@@ -719,323 +720,6 @@ def extract_case_study_text(file_storage):
     return text, None                                          # success: return the text and no error
 
 
-def absolutize_static_urls(html, base_url):
-    """Rewrites relative /static/... src/href references (e.g. the email
-    builder's "Insert logo" button) into absolute URLs using the current
-    request's host. A relative path only resolves inside the browser tab
-    it was inserted in -- a recipient's email client has no "current
-    page" to resolve it against, so it just shows a broken image."""
-    base = base_url.rstrip('/')                                # remove any trailing slash from the base URL
-    return re.sub(r'(src|href)="(/static/[^"]*)"', lambda m: f'{m.group(1)}="{base}{m.group(2)}"', html)  # find all relative /static/... links and add the full domain in front
-
-
-# --- Email sending layer (SMTP + SendGrid) — Kadin Lee-Smith ---
-def _sg_from():
-    """Returns (from_email, from_name) from env vars."""
-    from_email = os.environ.get('SMTP_FROM_EMAIL') or os.environ.get('SENDGRID_FROM_EMAIL')  # read the "From" email address from .env (tries both names)
-    from_name  = os.environ.get('SMTP_FROM_NAME', 'CRM Platform')  # read the "From" display name from .env, defaulting to "CRM Platform"
-    return from_email, from_name                               # return both as a pair
-
-
-def send_email_smtp(to_email, subject, html_body, attachments=None):
-    """Send one email. Uses SendGrid HTTP API if SENDGRID_API_KEY is set
-    (bypasses SMTP port blocking on cloud hosts); falls back to SMTP
-    otherwise."""
-    api_key = os.environ.get('SENDGRID_API_KEY')              # check if a SendGrid API key is configured
-    if api_key:                                                # if yes, use SendGrid (preferred - works on cloud hosts like Render)
-        _sendgrid_api_single(api_key, to_email, subject, html_body, attachments)
-        return
-    # SMTP fallback
-    import smtplib                                             # Python's built-in email-sending library
-    from email.mime.multipart import MIMEMultipart             # builds multi-part email messages (body + attachments)
-    from email.mime.text import MIMEText                       # wraps the HTML body as an email part
-    from email.mime.application import MIMEApplication         # wraps file attachments as email parts
-
-    host = os.environ.get('SMTP_HOST')                        # your email server address from .env
-    if not host:
-        raise RuntimeError('Email sending is not configured on the server.')  # fail clearly if no email server is configured
-    port      = int(os.environ.get('SMTP_PORT', '587'))       # SMTP port (default 587 for TLS)
-    username  = os.environ.get('SMTP_USERNAME')               # SMTP login username from .env
-    password  = os.environ.get('SMTP_PASSWORD')               # SMTP login password from .env
-    from_email, from_name = _sg_from()                        # get the "From" address and display name
-    from_email = from_email or username                        # if no explicit from address, use the SMTP username
-    use_tls = os.environ.get('SMTP_USE_TLS', 'true').strip().lower() not in ('0', 'false', 'no')  # whether to use TLS encryption (defaults to true)
-
-    msg = MIMEMultipart('mixed')                              # create a new email message container
-    msg['Subject'] = subject or '(no subject)'               # set the email subject line
-    msg['From'] = f'{from_name} <{from_email}>'              # set the From header (e.g. "CRM Platform <info@company.com>")
-    msg['To'] = to_email                                      # set the To header
-    alt = MIMEMultipart('alternative')                        # create an inner container for the email body
-    alt.attach(MIMEText(html_body, 'html'))                   # add the HTML body to the message
-    msg.attach(alt)                                           # attach the body container to the main message
-    for filename, mimetype, data in (attachments or []):      # loop through any file attachments
-        part = MIMEApplication(data, Name=filename)           # wrap the file data as an attachment part
-        part['Content-Disposition'] = f'attachment; filename="{filename}"'  # tell the email client this is a downloadable file
-        msg.attach(part)                                      # add the attachment to the email
-    with smtplib.SMTP(host, port, timeout=20) as server:     # open a connection to the SMTP server
-        if use_tls:
-            server.starttls()                                 # upgrade the connection to TLS encryption
-        if username and password:
-            server.login(username, password)                  # authenticate with the email server
-        server.sendmail(from_email, [to_email], msg.as_string())  # actually send the email
-
-
-def _sendgrid_api_single(api_key, to_email, subject, html_body, attachments=None):
-    """Send one email via SendGrid HTTP API (HTTPS, never blocked)."""
-    import requests, base64                                    # requests makes HTTP calls; base64 encodes attachments for the API
-    from_email, from_name = _sg_from()                        # get the From address and name from .env
-    if not from_email:
-        raise RuntimeError('Set SMTP_FROM_EMAIL in environment variables.')  # can't send without a From address
-
-    payload = {                                                # build the JSON body for the SendGrid API request
-        'personalizations': [{'to': [{'email': to_email}]}],  # who the email is going to
-        'from': {'email': from_email, 'name': from_name},     # who the email is from
-        'subject': subject or '(no subject)',                  # email subject line
-        'content': [{'type': 'text/html', 'value': html_body}],  # the HTML email body
-    }
-    if attachments:                                            # if there are file attachments, add them to the payload
-        payload['attachments'] = [
-            {'content': base64.b64encode(data).decode(), 'filename': fname,  # base64-encode each file's raw bytes
-             'type': mime, 'disposition': 'attachment'}
-            for fname, mime, data in attachments              # loop through each (filename, mimetype, data) tuple
-        ]
-    res = requests.post(                                       # send the HTTP POST request to SendGrid
-        'https://api.sendgrid.com/v3/mail/send',
-        headers={'Authorization': f'Bearer {api_key}'},       # authenticate with the SendGrid API key
-        json=payload, timeout=30,                             # send the payload as JSON, wait up to 30 seconds
-    )
-    if res.status_code not in (200, 202):                     # SendGrid returns 202 on success; anything else is an error
-        raise RuntimeError(f'SendGrid error {res.status_code}: {res.text[:300]}')
-
-
-def send_flyer_bulk_smtp(recipients, subject, html_body, png_bytes=None, png_filename='flyer.png'):
-    """Bulk-send a flyer to a list of recipients. Uses SendGrid HTTP API
-    when SENDGRID_API_KEY is set (BCC batches of 500); falls back to
-    SMTP BCC batches of 50. Returns (sent_count, failed_count)."""
-    api_key = os.environ.get('SENDGRID_API_KEY')              # check if SendGrid is configured
-    if api_key:                                                # if yes, use SendGrid (handles large batches much better)
-        return _sendgrid_api_bulk(api_key, recipients, subject, html_body, png_bytes, png_filename)
-    # SMTP fallback
-    import smtplib                                             # Python's built-in email library
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-    from email.mime.application import MIMEApplication
-
-    host = os.environ.get('SMTP_HOST')                        # SMTP server address from .env
-    if not host:
-        raise RuntimeError('Email sending is not configured on the server.')
-    port      = int(os.environ.get('SMTP_PORT', '587'))       # SMTP port (default 587)
-    username  = os.environ.get('SMTP_USERNAME')
-    password  = os.environ.get('SMTP_PASSWORD')
-    from_email, from_name = _sg_from()
-    from_email = from_email or username
-    use_tls = os.environ.get('SMTP_USE_TLS', 'true').strip().lower() not in ('0', 'false', 'no')
-
-    BATCH = 50                                                 # send 50 recipients per email via SMTP BCC (SMTP servers often limit this)
-    sent = failed = 0                                          # track how many succeeded and failed
-    with smtplib.SMTP(host, port, timeout=30) as server:      # open one SMTP connection and reuse it for all batches
-        if use_tls:
-            server.starttls()                                  # upgrade to TLS encryption
-        if username and password:
-            server.login(username, password)                   # log in to the SMTP server
-        for i in range(0, len(recipients), BATCH):             # loop through recipients in chunks of 50
-            batch = recipients[i:i + BATCH]                    # take the next batch of up to 50 email addresses
-            msg = MIMEMultipart('mixed')                       # build a new email message for this batch
-            msg['Subject'] = subject or '(no subject)'
-            msg['From'] = f'{from_name} <{from_email}>'
-            msg['To']   = f'{from_name} <{from_email}>'       # "To" shows as the sender (recipients are in BCC for privacy)
-            alt = MIMEMultipart('alternative')
-            alt.attach(MIMEText(html_body, 'html'))            # add the HTML body
-            msg.attach(alt)
-            if png_bytes:                                      # if a flyer image was provided, attach it
-                part = MIMEApplication(png_bytes, Name=png_filename)
-                part['Content-Disposition'] = f'attachment; filename="{png_filename}"'
-                msg.attach(part)
-            try:
-                server.sendmail(from_email, [from_email] + batch, msg.as_string())  # send to this batch (BCC)
-                sent += len(batch)                             # count successes
-            except Exception:
-                failed += len(batch)                           # count failures
-    return sent, failed                                        # return total sent and failed counts
-
-
-def _sendgrid_api_bulk(api_key, recipients, subject, html_body, png_bytes=None, png_filename='flyer.png'):
-    """Bulk-send via SendGrid HTTP API using BCC personalizations."""
-    import requests, base64
-    from_email, from_name = _sg_from()
-    if not from_email:
-        raise RuntimeError('Set SMTP_FROM_EMAIL in environment variables.')
-
-    attachment = None
-    if png_bytes:                                              # if a flyer image was provided, prepare it as a base64-encoded attachment
-        attachment = {'content': base64.b64encode(png_bytes).decode(),
-                      'filename': png_filename, 'type': 'image/png',
-                      'disposition': 'attachment'}
-
-    BATCH = 500                                                # SendGrid allows up to 1000 BCC recipients per call; we use 500 to stay safe
-    sent = failed = 0
-    for i in range(0, len(recipients), BATCH):                 # loop through all recipients in chunks of 500
-        batch = recipients[i:i + BATCH]                        # get the next batch
-        payload = {
-            'personalizations': [{
-                'to': [{'email': from_email}],                 # "To" is the sender (recipients see their own address as BCC)
-                'bcc': [{'email': e} for e in batch],          # actual recipients in BCC so they can't see each other's addresses
-            }],
-            'from': {'email': from_email, 'name': from_name},
-            'subject': subject or '(no subject)',
-            'content': [{'type': 'text/html', 'value': html_body}],
-        }
-        if attachment:
-            payload['attachments'] = [attachment]              # add the flyer image attachment if there is one
-        try:
-            res = requests.post(
-                'https://api.sendgrid.com/v3/mail/send',
-                headers={'Authorization': f'Bearer {api_key}'},
-                json=payload, timeout=60,                      # send the batch; wait up to 60 seconds
-            )
-            if res.status_code in (200, 202):                  # success
-                sent += len(batch)
-            else:
-                failed += len(batch)                           # SendGrid rejected the batch
-        except Exception:
-            failed += len(batch)                               # network error or timeout
-    return sent, failed                                        # return the total sent and failed counts
-
-
-def _sendgrid_campaign_tracked(api_key, recipients, subject, html_body, send_id):
-    """Send campaign with one personalization per recipient so SendGrid webhooks
-    can include custom_args (send_id + contact_id) for per-contact tracking.
-    Uses up to 1000 personalizations per request (SendGrid limit)."""
-    import requests
-    from_email, from_name = _sg_from()
-    if not from_email:
-        raise RuntimeError('Set SMTP_FROM_EMAIL in environment variables.')
-
-    BATCH = 1000                                               # SendGrid allows up to 1000 personalizations per API call
-    sent = failed = 0
-    for i in range(0, len(recipients), BATCH):                 # send in batches of 1000
-        batch = recipients[i:i + BATCH]
-        payload = {
-            'personalizations': [
-                {
-                    'to': [{'email': r['email']}],             # each recipient gets their own "To" line (no BCC here)
-                    'custom_args': {                           # attach tracking data to each email so webhooks can identify who opened/clicked
-                        'send_id': str(send_id),              # the ID of this campaign send
-                        'contact_id': str(r['contact_id']),   # the ID of this specific contact
-                    },
-                }
-                for r in batch                                 # one personalization object per recipient
-            ],
-            'from': {'email': from_email, 'name': from_name},
-            'subject': subject or '(no subject)',
-            'content': [{'type': 'text/html', 'value': html_body}],
-            'tracking_settings': {
-                'click_tracking': {'enable': True},            # track when recipients click links in the email
-                'open_tracking': {'enable': True},             # track when recipients open the email
-            },
-        }
-        try:
-            res = requests.post(
-                'https://api.sendgrid.com/v3/mail/send',
-                headers={'Authorization': f'Bearer {api_key}'},
-                json=payload, timeout=60,
-            )
-            if res.status_code in (200, 202):
-                sent += len(batch)
-            else:
-                failed += len(batch)
-        except Exception:
-            failed += len(batch)
-    return sent, failed
-
-
-# --- Automated email sequence engine — Kadin Lee-Smith ---
-def _enroll_contact_in_sequences(contact_id, stage):
-    """Enroll a contact in all active sequences triggered by the given stage,
-    skipping if already enrolled and active."""
-    from datetime import datetime as _dt, timedelta
-    sequences = EmailSequence.query.filter_by(trigger_stage=stage, is_active=True).all()  # find all active sequences that trigger on this stage
-    for seq in sequences:                                      # loop through each matching sequence
-        if not seq.steps:                                      # skip sequences with no steps (nothing to send)
-            continue
-        already = EmailSequenceEnrollment.query.filter_by(
-            sequence_id=seq.id, contact_id=contact_id, status='active'
-        ).first()                                              # check if this contact is already enrolled and active in this sequence
-        if already:                                            # skip if already enrolled (don't double-enroll)
-            continue
-        first_step = seq.steps[0]                             # get the first step of the sequence to calculate when to send it
-        enrollment = EmailSequenceEnrollment(
-            sequence_id=seq.id,
-            contact_id=contact_id,
-            next_step_index=0,                                # start at step 0 (the first step)
-            next_send_at=_dt.utcnow() + timedelta(days=first_step.day_offset),  # schedule the first email based on the step's day offset
-            status='active',
-        )
-        db.session.add(enrollment)                            # queue the enrollment record to be saved
-    db.session.commit()                                       # save all enrollments at once
-
-
-def _process_sequence_emails(app):
-    """Send any sequence emails that are due. Called by the scheduler."""
-    import json as _json, urllib.request as _urlreq  # json for building the API payload, urlreq for making HTTP calls
-    from datetime import datetime as _dt
-    with app.app_context():                          # run inside the Flask app context so we can access the database
-        now = _dt.utcnow()                           # get the current time (UTC)
-        due = EmailSequenceEnrollment.query.filter(
-            EmailSequenceEnrollment.status == 'active',
-            EmailSequenceEnrollment.next_send_at <= now,   # find all enrollments whose next email is due right now or in the past
-        ).all()
-        sg_key = os.environ.get('SENDGRID_API_KEY') or (
-            os.environ.get('SMTP_PASSWORD', '').startswith('SG.') and os.environ.get('SMTP_PASSWORD')
-        ) or None                                    # look for a SendGrid key in two places: dedicated env var, or SMTP password starting with "SG."
-        from_email = os.environ.get('MAIL_FROM', os.environ.get('SMTP_USERNAME', ''))  # get the From address
-        for enrollment in due:                       # loop through every overdue enrollment
-            seq = enrollment.sequence
-            if not seq.is_active:                    # skip if the sequence was deactivated since this enrollment was created
-                continue
-            steps = seq.steps
-            if enrollment.next_step_index >= len(steps):  # if we've run out of steps, mark the enrollment complete
-                enrollment.status = 'completed'
-                db.session.commit()
-                continue
-            step = steps[enrollment.next_step_index]  # get the current step to send
-            contact = enrollment.contact
-            if not contact or not contact.email:     # skip contacts with no email address (can't send)
-                enrollment.status = 'cancelled'
-                db.session.commit()
-                continue
-            # Send email
-            if sg_key and from_email:                # only attempt to send if we have a SendGrid key and a from address
-                try:
-                    payload = {
-                        'personalizations': [{'to': [{'email': contact.email,
-                                                       'name': f'{contact.first_name or ""} {contact.last_name or ""}'.strip()}]}],
-                        'from': {'email': from_email},
-                        'subject': step.subject,     # the subject line from this sequence step
-                        'content': [{'type': 'text/html', 'value': step.body}],  # the email body from this step
-                    }
-                    req = _urlreq.Request(
-                        'https://api.sendgrid.com/v3/mail/send',
-                        data=_json.dumps(payload).encode(),  # convert the payload dict to JSON bytes
-                        headers={'Authorization': f'Bearer {sg_key}', 'Content-Type': 'application/json'},
-                        method='POST',
-                    )
-                    _urlreq.urlopen(req, timeout=15)  # send the request, wait up to 15 seconds
-                except Exception:
-                    continue  # leave next_send_at as-is; retry next run (don't advance the step if sending failed)
-            # Advance to next step
-            next_idx = enrollment.next_step_index + 1  # move to the next step
-            if next_idx >= len(steps):               # if there are no more steps, mark the enrollment as completed
-                enrollment.status = 'completed'
-                enrollment.next_step_index = next_idx
-            else:
-                next_step = steps[next_idx]          # get the next step to calculate when to send it
-                from datetime import timedelta
-                enrollment.next_step_index = next_idx
-                enrollment.next_send_at = now + timedelta(days=next_step.day_offset)  # schedule the next email based on its day offset
-            db.session.commit()                      # save the updated enrollment status
-
-
 _upload_tasks: dict = {}  # in-memory dictionary that tracks the status/progress of background spreadsheet import jobs
 
 
@@ -1081,17 +765,11 @@ def create_app(config_class=Config):
         db.create_all()                              # create all database tables if they don't exist yet
         # Add columns that didn't exist in earlier schema versions
         for stmt in [                                # list of SQL statements to add new columns to existing tables (safe to run repeatedly)
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_post_social BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS notes TEXT",
             "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS pipeline_stage VARCHAR(32)",
             "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP",
-            "ALTER TABLE flyer_templates ADD COLUMN background VARCHAR(32) DEFAULT '#ffffff'",
-            "ALTER TABLE flyer_templates ADD COLUMN bg_asset_id INTEGER",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_access_proposals BOOLEAN NOT NULL DEFAULT FALSE",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_access_email_events BOOLEAN NOT NULL DEFAULT FALSE",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_send_email BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_draft_email BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_export_contacts BOOLEAN NOT NULL DEFAULT FALSE",
         ]:
@@ -1103,18 +781,6 @@ def create_app(config_class=Config):
         _bootstrap_admin_user()                      # create the first admin account from .env if no users exist yet
         _seed_civic_orgs()                           # seed Dallas civic orgs into the outreach org table if not already there
         _seed_demo_contacts()                        # auto-seed fake contacts on first boot if DB is empty (portfolio demo)
-
-    # Start background scheduler for email sequences
-    try:
-        from apscheduler.schedulers.background import BackgroundScheduler  # APScheduler runs tasks on a timer in the background
-        _scheduler = BackgroundScheduler(daemon=True)  # daemon=True means the scheduler stops automatically when the app stops
-        _scheduler.add_job(
-            _process_sequence_emails, 'interval', hours=1,  # run the email sequence processor every 1 hour
-            args=[app], id='seq_emails', replace_existing=True,
-        )
-        _scheduler.start()                           # start the background scheduler
-    except Exception:
-        pass                                         # if the scheduler fails to start, the app still works - just no automated sequences
 
     contact_schema = ContactSchema()                 # schema for serializing a single contact to JSON
     contacts_schema = ContactSchema(many=True)       # schema for serializing a list of contacts to JSON
@@ -1217,187 +883,6 @@ def create_app(config_class=Config):
     @app.route('/profile/<int:contact_id>')
     def profile(contact_id):
         return render_template('profile.html', contact_id=contact_id)  # serve the contact profile page, passing the contact ID to the template
-
-    # ── Proposal Manager ──────────────────────────────────────────────── #
-
-    @app.route('/proposals')
-    @login_required
-    def proposals_hub():
-        denied = _check_permission('can_access_proposals')
-        if denied: return denied
-        proposals = Proposal.query.order_by(Proposal.updated_at.desc()).all()  # fetch all proposals, newest first
-        cs_count = CaseStudy.query.count()        # count how many case studies exist (shown on the hub page)
-        contact_count = Contact.query.count()     # count how many contacts exist (shown on the hub page)
-        return render_template('proposals_hub.html',
-                               proposals=proposals,
-                               cs_count=cs_count,
-                               contact_count=contact_count)
-
-    @app.route('/proposals/new')
-    @login_required
-    def proposal_new():
-        case_studies = CaseStudy.query.order_by(CaseStudy.created_at.desc()).all()  # load all case studies to populate the picker
-        return render_template('proposal_builder.html',
-                               proposal=None,             # no existing proposal - this is a blank new one
-                               case_studies=case_studies)
-
-    @app.route('/proposals/<int:proposal_id>')
-    @login_required
-    def proposal_detail(proposal_id):
-        proposal = Proposal.query.get_or_404(proposal_id)  # load the proposal or return a 404 error if not found
-        case_studies = CaseStudy.query.order_by(CaseStudy.created_at.desc()).all()  # load all case studies for the picker
-        # Hydrate linked contacts
-        contact_ids = proposal.contact_ids or []           # get the list of contact IDs stored on this proposal
-        contacts = Contact.query.filter(Contact.id.in_(contact_ids)).all() if contact_ids else []  # load the actual contact records
-        # Hydrate linked case studies
-        cs_ids = proposal.case_study_ids or []             # get the list of case study IDs stored on this proposal
-        linked_cs = CaseStudy.query.filter(CaseStudy.id.in_(cs_ids)).all() if cs_ids else []  # load the actual case study records
-        return render_template('proposal_builder.html',
-                               proposal=proposal,
-                               case_studies=case_studies,
-                               linked_contacts=contacts,
-                               linked_cs=linked_cs)
-
-    @app.route('/proposals/list')
-    @login_required
-    def proposals_list():
-        status_filter = request.args.get('status', '')     # optional ?status= filter in the URL
-        q = Proposal.query.order_by(Proposal.updated_at.desc())  # start with all proposals, newest first
-        if status_filter:
-            q = q.filter(Proposal.status == status_filter)  # filter by status if one was provided
-        proposals = q.all()
-        return render_template('proposals_list.html',
-                               proposals=proposals,
-                               status_filter=status_filter)
-
-    # --- Proposals API — Kadin Lee-Smith ---
-    @app.route('/api/proposals', methods=['GET'])
-    @login_required
-    def list_proposals():
-        per_page = request.args.get('per_page', 50, type=int)  # how many results to return per page (default 50)
-        page = request.args.get('page', 1, type=int)            # which page of results to return (default 1)
-        q = Proposal.query.order_by(Proposal.updated_at.desc())
-        total = q.count()                                       # total number of proposals (for pagination)
-        items = q.offset((page - 1) * per_page).limit(per_page).all()  # get just this page's records
-        return jsonify({'proposals': [p.to_dict() for p in items], 'total': total, 'per_page': per_page})
-
-    @app.route('/api/case-studies-count')
-    @login_required
-    def case_studies_count():
-        return jsonify({'count': CaseStudy.query.count()})  # return the number of case studies as JSON (used by the UI)
-
-    @app.route('/api/proposals', methods=['POST'])
-    @login_required
-    def create_proposal():
-        data = request.get_json(force=True)
-        p = Proposal(
-            title=data.get('title', 'Untitled Proposal'),
-            client_name=data.get('client_name'),
-            client_org=data.get('client_org'),
-            contact_ids=data.get('contact_ids', []),
-            case_study_ids=data.get('case_study_ids', []),
-            overview=data.get('overview'),
-            scope=data.get('scope'),
-            timeline=data.get('timeline'),
-            budget=data.get('budget'),
-            notes=data.get('notes'),
-            status=data.get('status', 'draft'),
-            created_by_id=current_user.id,
-        )
-        db.session.add(p)
-        db.session.commit()
-        return jsonify(p.to_dict()), 201
-
-    @app.route('/api/proposals/<int:proposal_id>', methods=['PUT'])
-    @login_required
-    def update_proposal(proposal_id):
-        p = Proposal.query.get_or_404(proposal_id)
-        data = request.get_json(force=True)
-        for field in ('title', 'client_name', 'client_org', 'contact_ids',
-                      'case_study_ids', 'overview', 'scope', 'timeline',
-                      'budget', 'notes', 'status'):
-            if field in data:
-                setattr(p, field, data[field])
-        db.session.commit()
-        return jsonify(p.to_dict())
-
-    @app.route('/api/proposals/<int:proposal_id>', methods=['DELETE'])
-    @login_required
-    def delete_proposal(proposal_id):
-        p = Proposal.query.get_or_404(proposal_id)
-        db.session.delete(p)
-        db.session.commit()
-        return jsonify({'ok': True})
-
-    @app.route('/api/proposals/generate', methods=['POST'])
-    @login_required
-    def generate_proposal():
-        from groq import Groq
-        api_key = os.environ.get('GROQ_API_KEY')
-        if not api_key:
-            return jsonify({'error': 'GROQ_API_KEY is not configured on the server.'}), 500
-
-        data = request.get_json(force=True)
-        title       = (data.get('title') or '').strip()
-        client_name = (data.get('client_name') or '').strip()
-        client_org  = (data.get('client_org') or '').strip()
-        timeline    = (data.get('timeline') or '').strip()
-        budget      = (data.get('budget') or '').strip()
-        user_prompt = (data.get('prompt') or '').strip()
-        cs_ids      = data.get('case_study_ids') or []
-
-        # Build context block
-        lines = ['You are drafting a project proposal for our organization.']
-        if title:        lines.append(f'Proposal title: {title}')
-        if client_name:  lines.append(f'Client: {client_name}')
-        if client_org:   lines.append(f'Organization: {client_org}')
-        if timeline:     lines.append(f'Timeline: {timeline}')
-        if budget:       lines.append(f'Budget: {budget}')
-
-        # Pull case study details
-        if cs_ids:
-            case_studies = CaseStudy.query.filter(CaseStudy.id.in_(cs_ids)).all()
-            for cs in case_studies:
-                block = [f'\nRelevant past work - "{cs.title}"']
-                if cs.client:  block.append(f'Client: {cs.client}')
-                if cs.sector:  block.append(f'Sector: {cs.sector}')
-                text = '\n'.join(filter(None, [cs.challenges, cs.solution, cs.results])) or cs.extracted_text or ''
-                if text: block.append(text[:1500])
-                lines.extend(block)
-
-        context = '\n'.join(lines)
-        user_content = context
-        if user_prompt:
-            user_content += f'\n\nAdditional context from the user: {user_prompt}'
-
-        system = (
-            'You write professional project proposals for our organization, a talent and project management company. '
-            'Given the context below, write two sections:\n'
-            '1. A concise "Overview" paragraph (3-5 sentences) that summarizes the project and its value to the client.\n'
-            '2. A "Scope of Work" section (4-8 bullet points) that details deliverables, services, and milestones.\n'
-            'Be specific and professional. Do not invent facts not provided - use [PLACEHOLDER] for missing specifics. '
-            'Respond ONLY with a JSON object: {"overview": "...", "scope": "..."}'
-        )
-
-        try:
-            client = Groq(api_key=api_key)
-            response = client.chat.completions.create(
-                model='llama-3.3-70b-versatile',
-                max_tokens=1200,
-                messages=[
-                    {'role': 'system', 'content': system},
-                    {'role': 'user', 'content': user_content},
-                ],
-            )
-            text = response.choices[0].message.content.strip()
-            import json as _json
-            if text.startswith('```'):
-                text = text.split('```')[1]
-                if text.startswith('json'): text = text[4:]
-            result = _json.loads(text.strip())
-            return jsonify({'overview': result.get('overview', ''), 'scope': result.get('scope', '')})
-        except Exception as e:
-            return jsonify({'error': str(e)}), 502
 
     @app.route('/case-studies')
     def case_studies_list():
@@ -1624,11 +1109,7 @@ def create_app(config_class=Config):
         if not current_user.is_admin:
             return redirect(url_for('index'))
         users = User.query.order_by(User.username).all()
-        social = {t.platform: t for t in SocialToken.query.all()}
-        li_configured = bool(_social_cfg('LINKEDIN_CLIENT_ID'))
-        fb_configured = bool(_social_cfg('FACEBOOK_APP_ID'))
-        return render_template('users.html', users=users, social=social,
-                               li_configured=li_configured, fb_configured=fb_configured)
+        return render_template('users.html', users=users)
 
     @app.route('/admin/audit')
     def audit_log():
@@ -1839,10 +1320,6 @@ def create_app(config_class=Config):
             username=username,
             display_name=display_name,
             is_admin=is_admin,
-            can_access_proposals=bool(data.get('can_access_proposals')),
-            can_access_email_events=bool(data.get('can_access_email_events')),
-            can_send_email=bool(data.get('can_send_email')),
-            can_post_social=bool(data.get('can_post_social')),
             can_draft_email=bool(data.get('can_draft_email')),
             can_export_contacts=bool(data.get('can_export_contacts')),
         )
@@ -1868,18 +1345,6 @@ def create_app(config_class=Config):
         log_audit('password_reset', 'user', user.id, user.username)
         return jsonify({'ok': True})
 
-    @app.route('/api/users/<int:user_id>/toggle-social', methods=['POST'])
-    @login_required
-    def toggle_user_social(user_id):
-        if not current_user.is_admin:
-            return jsonify({'error': 'admin only'}), 403
-        user = User.query.get_or_404(user_id)
-        user.can_post_social = not user.can_post_social
-        db.session.commit()
-        log_audit('social_permission_changed', 'user', user.id, user.username,
-                  {'can_post_social': user.can_post_social})
-        return jsonify({'ok': True, 'can_post_social': user.can_post_social})
-
     @app.route('/api/users/<int:user_id>/permissions', methods=['POST'])
     @login_required
     def update_user_permissions(user_id):
@@ -1889,7 +1354,7 @@ def create_app(config_class=Config):
         if user.is_admin:
             return jsonify({'error': 'Admin accounts have full access — permissions are not individually adjustable.'}), 400
         data = request.get_json(force=True) or {}
-        _flags = ['can_access_proposals', 'can_access_email_events', 'can_send_email', 'can_post_social', 'can_draft_email', 'can_export_contacts']
+        _flags = ['can_draft_email', 'can_export_contacts']
         for flag in _flags:
             if flag in data:
                 setattr(user, flag, bool(data[flag]))
@@ -2004,428 +1469,13 @@ def create_app(config_class=Config):
 
         return jsonify({'results': results})
 
-    @app.route('/email-events')
-    @login_required
-    def email_events_hub():
-        denied = _check_permission('can_access_email_events')
-        if denied: return denied
-        return render_template('email_events_hub.html')
-
-    @app.route('/email-builder')
-    def email_builder_list():
-        """Saved email designs from the drag-and-drop builder. Open to
-        everyone logged in, same as Draft Email/Create Flyer -- this is a
-        drafting tool, not a sensitive admin page. Sending (a later step)
-        is where a real-people-get-emailed confirmation belongs, not here."""
-        templates = EmailTemplate.query.filter(
-            db.or_(EmailTemplate.is_public == True, EmailTemplate.created_by_id == current_user.id)
-        ).order_by(EmailTemplate.updated_at.desc()).all()
-        return render_template('email_builder_list.html', templates=templates, current_user_id=current_user.id)
-
-    @app.route('/email-builder/<int:template_id>')
-    def email_builder_edit(template_id):
-        template = EmailTemplate.query.get_or_404(template_id)
-        return render_template('email_builder.html', template=template)
-
-    @app.route('/api/email-templates', methods=['GET'])
-    def list_email_templates():
-        items = EmailTemplate.query.filter(
-            db.or_(EmailTemplate.is_public == True, EmailTemplate.created_by_id == current_user.id)
-        ).order_by(EmailTemplate.updated_at.desc()).all()
-        return jsonify({'email_templates': [t.to_dict() for t in items]})
-
-    # --- Email template builder API — Kadin Lee-Smith ---
-    @app.route('/api/email-templates', methods=['POST'])
-    def create_email_template():
-        data = request.get_json(force=True) or {}
-        name = (data.get('name') or '').strip() or 'Untitled email'
-        t = EmailTemplate(
-            name=name,
-            subject=(data.get('subject') or '').strip() or None,
-            blocks=data.get('blocks') or [],
-            created_by_id=current_user.id,
-        )
-        db.session.add(t)
-        db.session.commit()
-        log_audit('email_template_created', 'email_template', t.id, t.name)
-        return jsonify(t.to_dict()), 201
-
-    @app.route('/api/email-templates/<int:template_id>', methods=['GET'])
-    def get_email_template(template_id):
-        t = EmailTemplate.query.get_or_404(template_id)
-        return jsonify(t.to_dict())
-
-    @app.route('/api/email-templates/<int:template_id>', methods=['PUT'])
-    def update_email_template(template_id):
-        t = EmailTemplate.query.get_or_404(template_id)
-        data = request.get_json(force=True) or {}
-        t.name = (data.get('name') or '').strip() or 'Untitled email'
-        t.subject = (data.get('subject') or '').strip() or None
-        t.blocks = data.get('blocks') or []
-        if 'is_public' in data:
-            t.is_public = bool(data['is_public'])
-        db.session.commit()
-        log_audit('email_template_updated', 'email_template', t.id, t.name)
-        return jsonify(t.to_dict())
-
-    @app.route('/api/email-templates/<int:template_id>', methods=['DELETE'])
-    def delete_email_template(template_id):
-        t = EmailTemplate.query.get_or_404(template_id)
-        label = t.name
-        db.session.delete(t)
-        db.session.commit()
-        log_audit('email_template_deleted', 'email_template', template_id, label)
-        return jsonify({'deleted': True})
-
-    @app.route('/api/email-templates/<int:template_id>/duplicate', methods=['POST'])
-    def duplicate_email_template(template_id):
-        import copy as _copy
-        t = EmailTemplate.query.get_or_404(template_id)
-        dup = EmailTemplate(
-            name=f'{t.name} (copy)',
-            subject=t.subject,
-            blocks=_copy.deepcopy(t.blocks),
-            is_public=False,
-            created_by_id=current_user.id,
-        )
-        db.session.add(dup)
-        db.session.commit()
-        log_audit('email_template_created', 'email_template', dup.id, dup.name)
-        return jsonify(dup.to_dict()), 201
-
-    @app.route('/api/email-templates/<int:template_id>/send-bulk', methods=['POST'])
-    @login_required
-    def send_email_template_bulk(template_id):
-        """Send the email template to a filtered group of contacts.
-        Merge tags ({{first_name}} etc.) are replaced per-contact.
-        Only contacts with a non-empty email address receive the email."""
-        denied = _check_permission('can_send_email')
-        if denied: return denied
-        import re as _re
-        t = EmailTemplate.query.get_or_404(template_id)
-        data = request.get_json(force=True) or {}
-        tag_filter = (data.get('tag') or '').strip()
-        subject_override = (data.get('subject') or '').strip()
-        html_body = (data.get('html') or '').strip()
-        if not html_body:
-            return jsonify({'error': 'Email has no content.'}), 400
-
-        query = Contact.query.filter(Contact.email.isnot(None), Contact.email != '')
-        if tag_filter:
-            query = query.filter(Contact.tag == tag_filter)
-        contacts = query.all()
-        if not contacts:
-            return jsonify({'error': 'No contacts with email addresses match that filter.'}), 400
-
-        subject = subject_override or t.subject or t.name or 'Email from CRM Platform'
-
-        def replace_tags(text, contact):
-            replacements = {
-                '{{first_name}}': contact.first_name or '',
-                '{{last_name}}':  contact.last_name or '',
-                '{{full_name}}':  ' '.join(filter(None, [contact.first_name, contact.last_name])),
-                '{{organization}}': contact.organization or '',
-                '{{title}}':      contact.title or '',
-            }
-            for tag, val in replacements.items():
-                text = text.replace(tag, val)
-            return text
-
-        host_url = request.host_url
-        sent, failed = 0, 0
-        errors = []
-        template_id_value, template_name = t.id, t.name
-        db.session.close()
-
-        for contact in contacts:
-            try:
-                body = replace_tags(html_body, contact)
-                body = absolutize_static_urls(body, host_url)
-                wrapped = (
-                    '<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;'
-                    f'margin:0 auto;padding:16px;">{body}</div>'
-                )
-                contact_subject = replace_tags(subject, contact)
-                send_email_smtp(contact.email, contact_subject, wrapped, [])
-                sent += 1
-            except Exception as e:
-                failed += 1
-                errors.append(str(e))
-
-        log_audit('email_template_sent', 'email_template', template_id_value, template_name, {
-            'bulk': True, 'tag': tag_filter, 'sent': sent, 'failed': failed,
-        })
-        return jsonify({'sent': sent, 'failed': failed, 'errors': errors[:5]})
-
-    @app.route('/api/email-templates/<int:template_id>/send', methods=['POST'])
-    def send_email_template(template_id):
-        denied = _check_permission('can_send_email')
-        if denied: return denied
-        """Sends the current compose content to one typed-in address --
-        a quick send/test capability, not the bulk "send to my filtered
-        contact list" feature (that needs batching, an unsubscribe
-        mechanism, and background dispatch since it could be hundreds of
-        real people; this is a single address, fast enough to send inline
-        within the request)."""
-        t = EmailTemplate.query.get_or_404(template_id)
-        to_email = (request.form.get('to') or '').strip()
-        if not to_email:
-            return jsonify({'error': 'Enter a recipient email address.'}), 400
-        subject = (request.form.get('subject') or t.subject or t.name or '').strip()
-        html_body = request.form.get('html') or ''
-        if not html_body.strip():
-            return jsonify({'error': 'This email has no content yet.'}), 400
-
-        files = request.files.getlist('attachments')
-        if len(files) > 5:
-            return jsonify({'error': 'Attach at most 5 files.'}), 400
-        attachments = []
-        total_bytes = 0
-        for f in files:
-            if not f or not f.filename:
-                continue
-            data = f.read()
-            total_bytes += len(data)
-            if total_bytes > 15 * 1024 * 1024:
-                return jsonify({'error': 'Attachments are too large (15MB total limit).'}), 400
-            attachments.append((f.filename, f.mimetype or 'application/octet-stream', data))
-
-        html_body = absolutize_static_urls(html_body, request.host_url)
-        wrapped_html = (
-            '<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;'
-            f'margin:0 auto;padding:16px;">{html_body}</div>'
-        )
-
-        # Capture what log_audit needs as plain values, then release the DB
-        # connection before the slow SMTP network call. Flask-SQLAlchemy
-        # holds one connection checked out for the whole request -- left
-        # idle for the several seconds an SMTP handshake can take, Neon's
-        # pooler closes it server-side, and the next query after (the
-        # audit log write, or Flask-Login re-touching current_user) fails
-        # with "SSL connection has been closed unexpectedly" even though
-        # the email itself sent fine. db.session.close() forces a fresh
-        # connection to be checked out afterward instead of reusing the
-        # one that just sat idle through the delay.
-        template_id_value, template_name = t.id, t.name
-        db.session.close()
-
-        try:
-            send_email_smtp(to_email, subject, wrapped_html, attachments)
-        except RuntimeError as e:
-            return jsonify({'error': str(e)}), 500
-        except Exception as e:
-            return jsonify({'error': f'Could not send: {e}'}), 502
-
-        log_audit('email_template_sent', 'email_template', template_id_value, template_name, {
-            'to': to_email, 'attachment_count': len(attachments),
-        })
-        return jsonify({'sent': True})
-
-    # ------------------------------------------------------------------ #
-    # Flyer / canvas builder                                               #
-    # ------------------------------------------------------------------ #
-
-    def _valid_flyer_formats():
-        from flyer_render import CANVAS_FORMATS
-        return set(CANVAS_FORMATS.keys())
-
-    @app.route('/flyer-builder')
-    def flyer_builder_list():
-        templates = FlyerTemplate.query.filter(
-            db.or_(FlyerTemplate.is_public == True, FlyerTemplate.created_by_id == current_user.id)
-        ).order_by(FlyerTemplate.updated_at.desc()).all()
-        return render_template('flyer_builder_list.html', templates=templates, current_user_id=current_user.id)
-
-    @app.route('/flyer-builder/<int:template_id>')
-    def flyer_builder_edit(template_id):
-        template = FlyerTemplate.query.get_or_404(template_id)
-        return render_template('flyer_builder.html', template=template)
-
-    @app.route('/api/flyer-templates', methods=['GET'])
-    def list_flyer_templates():
-        items = FlyerTemplate.query.filter(
-            db.or_(FlyerTemplate.is_public == True, FlyerTemplate.created_by_id == current_user.id)
-        ).order_by(FlyerTemplate.updated_at.desc()).all()
-        return jsonify({'flyer_templates': [t.to_dict() for t in items]})
-
-    # --- Flyer / social media designer API — Kadin Lee-Smith ---
-    @app.route('/api/flyer-templates', methods=['POST'])
-    def create_flyer_template():
-        data = request.get_json(force=True) or {}
-        t = FlyerTemplate(
-            name=(data.get('name') or '').strip() or 'Untitled flyer',
-            format=data.get('format', 'square') if data.get('format') in _valid_flyer_formats() else 'square',
-            elements=data.get('elements') or [],
-            background=data.get('background') or '#ffffff',
-            bg_asset_id=data.get('bg_asset_id'),
-            created_by_id=current_user.id,
-        )
-        db.session.add(t)
-        db.session.commit()
-        log_audit('flyer_template_created', 'flyer_template', t.id, t.name)
-        return jsonify(t.to_dict()), 201
-
-    @app.route('/api/flyer-templates/<int:template_id>', methods=['GET'])
-    def get_flyer_template(template_id):
-        return jsonify(FlyerTemplate.query.get_or_404(template_id).to_dict())
-
-    @app.route('/api/flyer-templates/<int:template_id>', methods=['PUT'])
-    def update_flyer_template(template_id):
-        t = FlyerTemplate.query.get_or_404(template_id)
-        data = request.get_json(force=True) or {}
-        t.name = (data.get('name') or '').strip() or 'Untitled flyer'
-        if data.get('format') in _valid_flyer_formats():
-            t.format = data['format']
-        t.elements = data.get('elements') or []
-        if 'background' in data:
-            t.background = (data.get('background') or '#ffffff')[:32]
-        if 'bg_asset_id' in data:
-            t.bg_asset_id = data.get('bg_asset_id')
-        if 'is_public' in data:
-            t.is_public = bool(data['is_public'])
-        db.session.commit()
-        log_audit('flyer_template_updated', 'flyer_template', t.id, t.name)
-        return jsonify(t.to_dict())
-
-    @app.route('/api/flyer-templates/<int:template_id>', methods=['DELETE'])
-    def delete_flyer_template(template_id):
-        t = FlyerTemplate.query.get_or_404(template_id)
-        label = t.name
-        db.session.delete(t)
-        db.session.commit()
-        log_audit('flyer_template_deleted', 'flyer_template', template_id, label)
-        return jsonify({'deleted': True})
-
-    @app.route('/api/flyer-templates/<int:template_id>/send', methods=['POST'])
-    @login_required
-    def send_flyer_template(template_id):
-        t = FlyerTemplate.query.get_or_404(template_id)
-        data = request.get_json(force=True) or {}
-
-        subject         = (data.get('subject') or '').strip() or t.name
-        message         = (data.get('message') or '').strip()
-        tag             = data.get('tag', '')
-        county          = data.get('county', '')
-        q               = data.get('q', '')
-        followup        = data.get('followup', '')
-        favorites_only  = bool(data.get('favorites_only', False))
-        background      = data.get('background', t.background or '#ffffff')
-        bg_asset_id     = data.get('bg_asset_id', t.bg_asset_id)
-
-        contacts = filtered_contacts_query(
-            q=q, tag=tag, county=county, followup=followup, favorites_only=favorites_only
-        ).filter(
-            Contact.email.isnot(None),
-            Contact.email != '',
-            Contact.unsubscribed == False,
-        ).all()
-
-        if not contacts:
-            return jsonify({'error': 'No contacts with email addresses match this filter.'}), 400
-
-        from flyer_render import render_flyer_png
-
-        def asset_loader(asset_id):
-            try:
-                a = FlyerAsset.query.get(int(asset_id))
-                return a.data if a else None
-            except (TypeError, ValueError):
-                return None
-
-        bg_img_bytes = None
-        if bg_asset_id:
-            try:
-                _a = FlyerAsset.query.get(int(bg_asset_id))
-                if _a:
-                    bg_img_bytes = _a.data
-            except (TypeError, ValueError):
-                pass
-        png_bytes = render_flyer_png(t.elements, fmt=t.format, bg_color=background, asset_loader=asset_loader, bg_image_bytes=bg_img_bytes)
-
-        msg_part = f'<p style="margin:0 0 16px;">{message}</p>' if message else ''
-        html_body = (
-            '<div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;padding:16px;">'
-            f'{msg_part}'
-            '<p style="color:#666;font-size:13px;margin:12px 0 0;">See the attached flyer.</p>'
-            '</div>'
-        )
-
-        safe_name = ''.join(c if c.isalnum() or c in ' -_' else '_' for c in t.name)
-        png_filename = f'{safe_name}.png'
-        recipients = [c.email for c in contacts]
-        template_id_val, template_name = t.id, t.name
-        db.session.close()
-
-        try:
-            sent, failed = send_flyer_bulk_smtp(recipients, subject, html_body, png_bytes, png_filename)
-        except RuntimeError as e:
-            return jsonify({'error': str(e)}), 500
-        except Exception as e:
-            return jsonify({'error': f'Could not send: {e}'}), 502
-
-        log_audit('flyer_template_sent', 'flyer_template', template_id_val, template_name, {
-            'recipient_count': len(recipients), 'sent': sent, 'failed': failed,
-        })
-        return jsonify({'sent': sent, 'failed': failed, 'total': len(recipients)})
-
-    @app.route('/api/flyer-templates/<int:template_id>/render', methods=['POST'])
-    def render_flyer_template(template_id):
-        import base64
-        from flyer_render import render_flyer_png, CANVAS_FORMATS
-
-        t = FlyerTemplate.query.get_or_404(template_id)
-        data = request.get_json(silent=True) or {}
-        elements = data.get('elements') or t.elements or []
-        fmt = t.format
-
-        def asset_loader(asset_id):
-            try:
-                a = FlyerAsset.query.get(int(asset_id))
-                return a.data if a else None
-            except (TypeError, ValueError):
-                return None
-
-        bg = data.get('background', t.background or '#ffffff')
-        bg_asset_id = data.get('bg_asset_id', t.bg_asset_id)
-        bg_image_bytes = None
-        if bg_asset_id:
-            a = FlyerAsset.query.get(int(bg_asset_id))
-            if a:
-                bg_image_bytes = a.data
-        png_bytes = render_flyer_png(elements, fmt=fmt, bg_color=bg, asset_loader=asset_loader, bg_image_bytes=bg_image_bytes)
-        return jsonify({
-            'image': 'data:image/png;base64,' + base64.b64encode(png_bytes).decode(),
-            'width':  CANVAS_FORMATS.get(fmt, CANVAS_FORMATS['square'])['rw'],
-            'height': CANVAS_FORMATS.get(fmt, CANVAS_FORMATS['square'])['rh'],
-        })
-
-    @app.route('/api/flyer-assets', methods=['POST'])
-    def upload_flyer_asset():
-        f = request.files.get('file')
-        if not f or not f.filename:
-            return jsonify({'error': 'No file provided.'}), 400
-        data = f.read()
-        if len(data) > 10 * 1024 * 1024:
-            return jsonify({'error': 'File too large (10MB limit).'}), 400
-        asset = FlyerAsset(data=data, mimetype=f.mimetype or 'application/octet-stream')
-        db.session.add(asset)
-        db.session.commit()
-        return jsonify({'id': asset.id, 'mimetype': asset.mimetype}), 201
-
-    @app.route('/flyer-builder/assets/<int:asset_id>')
-    def serve_flyer_asset(asset_id):
-        asset = FlyerAsset.query.get_or_404(asset_id)
-        return send_file(
-            io.BytesIO(asset.data),
-            mimetype=asset.mimetype,
-        )
-
     # --- Contact list, search, and filter API — Kadin Lee-Smith ---
     @app.route('/api/contacts', methods=['GET'])
     def list_contacts():
         q = request.args.get('q', type=str)
         tag = parse_multi_param('tag')
         county = parse_multi_param('county')
+        organization = parse_multi_param('organization')
         followup = request.args.get('followup', type=str)
         favorites_only = request.args.get('favorites_only', type=str) in ('1', 'true', 'True')
         incomplete_only = request.args.get('incomplete_only', type=str) in ('1', 'true', 'True')
@@ -2433,10 +1483,10 @@ def create_app(config_class=Config):
         page = request.args.get('page', default=1, type=int)
         limit = request.args.get('limit', default=25, type=int)
 
-        query = filtered_contacts_query(q=q, tag=tag, county=county, followup=followup, favorites_only=favorites_only, incomplete_only=incomplete_only, show_deleted=show_deleted)
+        query = filtered_contacts_query(q=q, tag=tag, county=county, organization=organization, followup=followup, favorites_only=favorites_only, incomplete_only=incomplete_only, show_deleted=show_deleted)
 
         total = query.count()
-        results = query.order_by(Contact.added.desc()).offset((page - 1) * limit).limit(limit).all()
+        results = query.order_by(func.lower(Contact.first_name), func.lower(Contact.last_name)).offset((page - 1) * limit).limit(limit).all()
         contacts = contacts_schema.dump(results)
 
         # Batched per-page lookup of outreach recency, not per-contact --
@@ -2710,6 +1760,7 @@ def create_app(config_class=Config):
         total = Contact.query.count()
         incomplete = Contact.query.filter(contact_incomplete_clause()).count()
         organizations = OutreachOrg.query.count()
+        groups = Group.query.count()
         complete_pct = round(100 * (total - incomplete) / total) if total else 0
         per_tag = db.session.query(Contact.tag, func.count(Contact.id)).group_by(Contact.tag).all()
         per_county = db.session.query(Contact.county, func.count(Contact.id)).group_by(Contact.county).all()
@@ -2717,6 +1768,7 @@ def create_app(config_class=Config):
             'total': total,
             'incomplete': incomplete,
             'organizations': organizations,
+            'groups': groups,
             'complete_pct': complete_pct,
             'by_tag': {k if k else '': v for k, v in per_tag},
             'by_county': {k if k else '': v for k, v in per_county}
@@ -2726,6 +1778,17 @@ def create_app(config_class=Config):
     def tags():
         tags = [t[0] for t in db.session.query(Contact.tag).distinct().all()]
         return jsonify(sorted([t for t in tags if t]))
+
+    @app.route('/api/contact-organizations', methods=['GET'])
+    def contact_organizations():
+        # Distinct organization names contacts belong to, for the
+        # People-view "Organization" filter -- separate from OutreachOrg,
+        # which backs the Organizations view's own category filter.
+        orgs = [o[0] for o in db.session.query(Contact.organization).filter(
+            Contact.organization.isnot(None), Contact.organization != '',
+            Contact.deleted_at.is_(None),
+        ).distinct().all()]
+        return jsonify(sorted(orgs, key=str.lower))
 
     @app.route('/api/categories', methods=['GET'])
     def categories():
@@ -2839,6 +1902,128 @@ def create_app(config_class=Config):
 
         return jsonify({'page': page, 'limit': limit, 'total': total, 'organizations': page_items})
 
+    @app.route('/api/sections', methods=['POST'])
+    def create_section():
+        data = request.get_json() or {}
+        organization = (data.get('organization') or '').strip()
+        tag = (data.get('tag') or '').strip()
+        if not organization:
+            return jsonify({'error': 'organization name is required'}), 400
+        existing = OutreachOrg.query.filter(
+            func.lower(OutreachOrg.organization) == organization.lower(),
+            func.lower(OutreachOrg.tag) == tag.lower(),
+        ).first()
+        if existing:
+            return jsonify({'error': 'that organization already exists in this category', 'id': existing.id}), 409
+        updated = None
+        if data.get('updated'):
+            try:
+                updated = date.fromisoformat(data['updated'])
+            except ValueError:
+                return jsonify({'error': 'invalid updated date'}), 400
+        o = OutreachOrg(
+            tag=tag or 'Other',
+            organization=organization,
+            updated=updated,
+            notes=(data.get('notes') or '').strip() or None,
+        )
+        db.session.add(o)
+        db.session.commit()
+        log_audit('organization_created', 'organization', o.id, o.organization)
+        return jsonify(o.to_dict()), 201
+
+    # --- Groups: hand-picked contact lists (e.g. "2026 Gala Invitees") ---
+    @app.route('/api/groups', methods=['GET'])
+    def list_groups():
+        q = request.args.get('q', type=str)
+        page = request.args.get('page', default=1, type=int)
+        limit = request.args.get('limit', default=25, type=int)
+        query = Group.query
+        if q:
+            like = f"%{q}%"
+            query = query.filter(or_(Group.name.ilike(like), Group.description.ilike(like)))
+        query = query.order_by(func.lower(Group.name))
+        total = query.count()
+        groups = query.offset((page - 1) * limit).limit(limit).all()
+        return jsonify({'page': page, 'limit': limit, 'total': total, 'groups': [g.to_dict() for g in groups]})
+
+    @app.route('/api/groups', methods=['POST'])
+    def create_group():
+        data = request.get_json() or {}
+        name = (data.get('name') or '').strip()
+        if not name:
+            return jsonify({'error': 'group name is required'}), 400
+        existing = Group.query.filter(func.lower(Group.name) == name.lower()).first()
+        if existing:
+            return jsonify({'error': 'a group with that name already exists', 'id': existing.id}), 409
+        g = Group(
+            name=name,
+            description=(data.get('description') or '').strip() or None,
+            contact_ids=[int(i) for i in (data.get('contact_ids') or [])],
+            created_by_id=current_user.id,
+        )
+        db.session.add(g)
+        db.session.commit()
+        log_audit('group_created', 'group', g.id, g.name)
+        return jsonify(g.to_dict()), 201
+
+    @app.route('/api/groups/<int:group_id>', methods=['GET'])
+    def get_group(group_id):
+        g = Group.query.get_or_404(group_id)
+        contact_ids = g.contact_ids or []
+        contacts = Contact.query.filter(Contact.id.in_(contact_ids)).order_by(func.lower(Contact.first_name), func.lower(Contact.last_name)).all() if contact_ids else []
+        d = g.to_dict()
+        d['contacts'] = contacts_schema.dump(contacts)
+        return jsonify(d)
+
+    @app.route('/api/groups/<int:group_id>', methods=['PUT'])
+    def update_group(group_id):
+        g = Group.query.get_or_404(group_id)
+        data = request.get_json() or {}
+        if 'name' in data:
+            name = (data.get('name') or '').strip()
+            if not name:
+                return jsonify({'error': 'group name is required'}), 400
+            dupe = Group.query.filter(func.lower(Group.name) == name.lower(), Group.id != g.id).first()
+            if dupe:
+                return jsonify({'error': 'a group with that name already exists', 'id': dupe.id}), 409
+            g.name = name
+        if 'description' in data:
+            g.description = (data.get('description') or '').strip() or None
+        db.session.commit()
+        log_audit('group_updated', 'group', g.id, g.name)
+        return jsonify(g.to_dict())
+
+    @app.route('/api/groups/<int:group_id>', methods=['DELETE'])
+    def delete_group(group_id):
+        g = Group.query.get_or_404(group_id)
+        label = g.name
+        db.session.delete(g)
+        db.session.commit()
+        log_audit('group_deleted', 'group', group_id, label)
+        return jsonify({'deleted': True})
+
+    @app.route('/api/groups/<int:group_id>/contacts', methods=['POST'])
+    def add_group_contact(group_id):
+        g = Group.query.get_or_404(group_id)
+        data = request.get_json() or {}
+        contact_id = data.get('contact_id')
+        contact = Contact.query.get_or_404(contact_id)
+        ids = list(g.contact_ids or [])
+        if contact.id not in ids:
+            ids.append(contact.id)
+            g.contact_ids = ids
+            db.session.commit()
+        return jsonify(g.to_dict())
+
+    @app.route('/api/groups/<int:group_id>/contacts/<int:contact_id>', methods=['DELETE'])
+    def remove_group_contact(group_id, contact_id):
+        g = Group.query.get_or_404(group_id)
+        ids = [i for i in (g.contact_ids or []) if i != contact_id]
+        g.contact_ids = ids
+        db.session.commit()
+        return jsonify(g.to_dict())
+
     # --- Background file upload & import pipeline — Kadin Lee-Smith ---
     @app.route('/api/upload', methods=['POST'])
     def upload():
@@ -2944,11 +2129,13 @@ def create_app(config_class=Config):
         q = request.args.get('q', type=str)
         tag = parse_multi_param('tag')
         org_tag = parse_multi_param('org_tag')
+        organization = parse_multi_param('organization')
         county = parse_multi_param('county')
         followup = request.args.get('followup', type=str)
         favorites_only = request.args.get('favorites_only', type=str) in ('1', 'true', 'True')
         contact_id = request.args.get('id', type=int)
-        rows = filtered_contacts_query(q=q, tag=tag, org_tag=org_tag, county=county, contact_id=contact_id, followup=followup, favorites_only=favorites_only).order_by(Contact.added.desc()).all()
+        group_id = request.args.get('group_id', type=int)
+        rows = filtered_contacts_query(q=q, tag=tag, org_tag=org_tag, organization=organization, county=county, contact_id=contact_id, group_id=group_id, followup=followup, favorites_only=favorites_only).order_by(func.lower(Contact.first_name), func.lower(Contact.last_name)).all()
 
         # stream CSV
         si = io.StringIO()
@@ -2974,10 +2161,12 @@ def create_app(config_class=Config):
         q = request.args.get('q', type=str)
         tag = parse_multi_param('tag')
         org_tag = parse_multi_param('org_tag')
+        organization = parse_multi_param('organization')
         county = parse_multi_param('county')
         followup = request.args.get('followup', type=str)
         favorites_only = request.args.get('favorites_only', type=str) in ('1', 'true', 'True')
-        rows = filtered_contacts_query(q=q, tag=tag, org_tag=org_tag, county=county, followup=followup, favorites_only=favorites_only).all()
+        group_id = request.args.get('group_id', type=int)
+        rows = filtered_contacts_query(q=q, tag=tag, org_tag=org_tag, organization=organization, county=county, group_id=group_id, followup=followup, favorites_only=favorites_only).all()
 
         emails = []
         seen = set()
@@ -3003,13 +2192,16 @@ def create_app(config_class=Config):
         q = request.args.get('q', type=str)
         tag = parse_multi_param('tag')
         org_tag = parse_multi_param('org_tag')
+        organization = parse_multi_param('organization')
         county = parse_multi_param('county')
         followup = request.args.get('followup', type=str)
         favorites_only = request.args.get('favorites_only', type=str) in ('1', 'true', 'True')
-        rows = filtered_contacts_query(q=q, tag=tag, org_tag=org_tag, county=county, followup=followup, favorites_only=favorites_only).order_by(Contact.organization, Contact.last_name).all()
+        group_id = request.args.get('group_id', type=int)
+        rows = filtered_contacts_query(q=q, tag=tag, org_tag=org_tag, organization=organization, county=county, group_id=group_id, followup=followup, favorites_only=favorites_only).order_by(Contact.organization, Contact.last_name).all()
 
+        group = Group.query.get(group_id) if group_id else None
         doc = Document()
-        title = ', '.join(tag) if tag else (', '.join(org_tag) if org_tag else 'Contacts')
+        title = group.name if group else (', '.join(tag) if tag else (', '.join(org_tag) if org_tag else 'Contacts'))
         doc.add_heading(title, level=1)
         doc.add_paragraph(f'{len(rows)} contact(s)')
 
@@ -3028,7 +2220,7 @@ def create_app(config_class=Config):
         buf = io.BytesIO()
         doc.save(buf)
         buf.seek(0)
-        safe_name = (tag or org_tag or 'contacts').replace('/', '-').replace(' ', '_')
+        safe_name = title.replace('/', '-').replace(' ', '_')
         return send_file(buf, mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                           as_attachment=True, download_name=f'{safe_name}_export.docx')
 
@@ -3225,7 +2417,7 @@ def create_app(config_class=Config):
 
         data = request.get_json(silent=True) or {}
         prompt = (data.get('prompt') or '').strip()
-        fmt = data.get('format') if data.get('format') in _valid_flyer_formats() else 'square'
+        fmt = data.get('format') if data.get('format') in ('square', 'portrait') else 'square'
         color_scheme  = data.get('color_scheme', 'maroon')
         bg_style      = data.get('bg_style', 'diagonal')
         logo_position = data.get('logo_position', 'top-left')
@@ -3560,118 +2752,6 @@ def create_app(config_class=Config):
             + '</div>'
         )
 
-    @app.route('/api/campaign/preview', methods=['GET'])
-    def campaign_preview():
-        q        = request.args.get('q')
-        tag      = request.args.get('tag')
-        county   = request.args.get('county')
-        followup = request.args.get('followup')
-        favorites_only = request.args.get('favorites_only') == 'true'
-        contacts = filtered_contacts_query(
-            q=q, tag=tag, county=county, followup=followup, favorites_only=favorites_only
-        ).filter(
-            Contact.email.isnot(None),
-            Contact.email != '',
-            Contact.unsubscribed == False,
-        ).all()
-        sample = [
-            f"{(c.first_name or '')} {(c.last_name or '')}".strip() or c.email
-            for c in contacts[:5]
-        ]
-        return jsonify({'recipient_count': len(contacts), 'sample': sample})
-
-    @app.route('/api/campaign/send', methods=['POST'])
-    @login_required
-    def campaign_send():
-        denied = _check_permission('can_send_email')
-        if denied: return denied
-        data    = request.get_json() or {}
-        subject = (data.get('subject') or '').strip()
-        body    = (data.get('body') or '').strip()
-        if not subject:
-            return jsonify({'error': 'Subject is required.'}), 400
-        if not body:
-            return jsonify({'error': 'Email body is required.'}), 400
-
-        q        = data.get('q')
-        tag      = data.get('tag')
-        county   = data.get('county')
-        followup = data.get('followup')
-        favorites_only = bool(data.get('favorites_only'))
-
-        contacts = filtered_contacts_query(
-            q=q, tag=tag, county=county, followup=followup, favorites_only=favorites_only
-        ).filter(
-            Contact.email.isnot(None),
-            Contact.email != '',
-            Contact.unsubscribed == False,
-        ).all()
-
-        if not contacts:
-            return jsonify({'error': 'No contacts with email addresses match this filter.'}), 400
-
-        html_body  = _text_to_html(body)
-        recipients = [c.email for c in contacts]
-        contact_ids = [c.id for c in contacts]
-        sent_by    = current_user.display_name
-
-        # Snapshot the send record before releasing the DB connection
-        send_rec = EmailSend(
-            sent_by_name=sent_by,
-            subject=subject,
-            filter_snapshot={'q': q, 'tag': tag, 'county': county, 'followup': followup},
-            recipient_count=len(contacts),
-            status='sending',
-            started_at=datetime.utcnow(),
-        )
-        db.session.add(send_rec)
-        db.session.commit()
-        send_id = send_rec.id
-
-        # Release connection before the slow network call (same pattern as
-        # the email-template send route -- avoids idle-connection SSL errors).
-        db.session.close()
-
-        # Use tracked per-recipient sends when SendGrid API key is available
-        sg_key = os.environ.get('SENDGRID_API_KEY') or (
-            os.environ.get('SMTP_PASSWORD', '').startswith('SG.') and os.environ.get('SMTP_PASSWORD')
-        ) or None
-        recipients_with_ids = [{'email': c.email, 'contact_id': c.id} for c in contacts]
-        try:
-            if sg_key:
-                sent, failed = _sendgrid_campaign_tracked(sg_key, recipients_with_ids, subject, html_body, send_id)
-            else:
-                sent, failed = send_flyer_bulk_smtp(recipients, subject, html_body)
-        except RuntimeError as e:
-            return jsonify({'error': str(e)}), 500
-        except Exception as e:
-            return jsonify({'error': f'Could not send: {e}'}), 502
-
-        # Update the send record status and log one outreach activity per contact
-        send_rec2 = EmailSend.query.get(send_id)
-        if send_rec2:
-            send_rec2.sent_count = sent
-            send_rec2.failed_count = failed
-            send_rec2.status = 'completed'
-            send_rec2.completed_at = datetime.utcnow()
-            db.session.commit()
-
-        for cid in contact_ids:
-            act = Activity(
-                contact_id=cid,
-                employee_name=sent_by,
-                channel='Email',
-                summary=f'Campaign email sent: {subject}',
-                contacted_on=date.today(),
-            )
-            db.session.add(act)
-        db.session.commit()
-
-        log_audit('campaign_sent', 'campaign', send_id, subject, {
-            'recipient_count': len(recipients), 'sent': sent, 'failed': failed,
-        })
-        return jsonify({'sent': sent, 'failed': failed, 'total': len(recipients)})
-
     # ------------------------------------------------------------------ #
     # Tasks — written by Kadin Lee-Smith                                  #
     # ------------------------------------------------------------------ #
@@ -3833,879 +2913,7 @@ def create_app(config_class=Config):
         log_audit('pipeline_stage_changed', 'contact', c.id,
                   f"{c.first_name or ''} {c.last_name or ''}".strip() or c.organization,
                   {'stage': stage})
-        # Auto-enroll in active sequences triggered by this stage
-        if stage:
-            _enroll_contact_in_sequences(c.id, stage)
         return jsonify({'ok': True, 'pipeline_stage': c.pipeline_stage})
-
-    # Email Tracking                                                         #
-
-    with app.app_context():
-        db.create_all()  # creates email_events table if missing
-
-    # --- SendGrid webhook + email open/click tracking — Kadin Lee-Smith ---
-    @app.route('/webhooks/sendgrid', methods=['POST'])
-    def sendgrid_webhook():
-        """Receives open/click/bounce events from SendGrid Event Webhook.
-        Configure in SendGrid: Settings → Mail Settings → Event Webhook
-        URL: https://your-domain.com/webhooks/sendgrid
-        Events to enable: Open, Click, Delivered, Bounce"""
-        events = request.get_json(force=True, silent=True) or []
-        if not isinstance(events, list):
-            events = [events]
-        for ev in events:
-            event_type = ev.get('event', '')
-            if event_type not in ('open', 'click', 'delivered', 'bounce', 'unsubscribe'):
-                continue
-            email = ev.get('email', '')
-            custom = ev.get('custom_args') or {}
-            send_id    = int(custom['send_id'])    if custom.get('send_id')    else None
-            contact_id = int(custom['contact_id']) if custom.get('contact_id') else None
-            ts = ev.get('timestamp')
-            occurred_at = datetime.utcfromtimestamp(int(ts)) if ts else datetime.utcnow()
-            record = EmailEvent(
-                send_id=send_id,
-                contact_id=contact_id,
-                email=email,
-                event_type=event_type,
-                url=ev.get('url'),
-                sg_message_id=ev.get('sg_message_id'),
-                occurred_at=occurred_at,
-            )
-            db.session.add(record)
-            # Auto-unsubscribe on unsubscribe event
-            if event_type == 'unsubscribe' and email:
-                c = Contact.query.filter_by(email=email).first()
-                if c and not c.unsubscribed:
-                    c.unsubscribed = True
-        db.session.commit()
-        return '', 204
-
-    @app.route('/api/contacts/<int:contact_id>/email-events', methods=['GET'])
-    @login_required
-    def contact_email_events(contact_id):
-        events = (EmailEvent.query
-                  .filter_by(contact_id=contact_id)
-                  .order_by(EmailEvent.occurred_at.desc())
-                  .limit(50).all())
-        summary = {}
-        for e in events:
-            summary[e.event_type] = summary.get(e.event_type, 0) + 1
-        return jsonify({'events': [e.to_dict() for e in events], 'summary': summary})
-
-    @app.route('/api/email-sends', methods=['GET'])
-    @login_required
-    def list_email_sends():
-        page     = request.args.get('page', 1, type=int)
-        per_page = 20
-        query    = EmailSend.query.order_by(EmailSend.started_at.desc())
-        total    = query.count()
-        sends    = query.offset((page - 1) * per_page).limit(per_page).all()
-        # Attach open/click counts from email_events
-        send_ids = [s.id for s in sends]
-        from sqlalchemy import func as sqlfunc
-        counts = {}
-        if send_ids:
-            rows = (db.session.query(
-                        EmailEvent.send_id,
-                        EmailEvent.event_type,
-                        sqlfunc.count(EmailEvent.id).label('n'),
-                        sqlfunc.count(sqlfunc.distinct(EmailEvent.contact_id)).label('unique_n'),
-                    )
-                    .filter(EmailEvent.send_id.in_(send_ids))
-                    .group_by(EmailEvent.send_id, EmailEvent.event_type)
-                    .all())
-            for row in rows:
-                counts.setdefault(row.send_id, {})[row.event_type] = {
-                    'total': row.n, 'unique': row.unique_n
-                }
-        result = []
-        for s in sends:
-            d = s.to_dict()
-            d['events'] = counts.get(s.id, {})
-            result.append(d)
-        return jsonify({'sends': result, 'total': total, 'page': page, 'per_page': per_page})
-
-    @app.route('/campaign-history')
-    @login_required
-    def campaign_history():
-        return render_template('campaign_history.html')
-
-    # Social Posting                                                         #
-
-    with app.app_context():
-        db.create_all()  # creates social_tokens table if missing
-
-    import urllib.parse as _urlparse
-    import urllib.request as _urlreq
-    import json as _json
-    import secrets as _secrets
-
-    def _social_cfg(key):
-        return app.config.get(key, '') or ''
-
-    @app.route('/api/social/status', methods=['GET'])
-    @login_required
-    def social_status():
-        tokens = {t.platform: t.to_dict() for t in SocialToken.query.all()}
-        return jsonify({
-            'linkedin': tokens.get('linkedin', {'connected': False}),
-            'facebook': tokens.get('facebook', {'connected': False}),
-        })
-
-    # ── LinkedIn OAuth ──────────────────────────────────────────────────── #
-
-    @app.route('/social/linkedin/connect')
-    @login_required
-    def linkedin_connect():
-        if not current_user.is_admin:
-            return 'Admin only', 403
-        client_id = _social_cfg('LINKEDIN_CLIENT_ID')
-        if not client_id:
-            return 'LINKEDIN_CLIENT_ID not set in .env', 400
-        state = _secrets.token_urlsafe(16)
-        from flask import session
-        session['linkedin_oauth_state'] = state
-        redirect_uri = _social_cfg('APP_BASE_URL') + '/social/linkedin/callback'
-        params = _urlparse.urlencode({
-            'response_type': 'code',
-            'client_id': client_id,
-            'redirect_uri': redirect_uri,
-            'state': state,
-            'scope': 'openid profile w_member_social',
-        })
-        return redirect(f'https://www.linkedin.com/oauth/v2/authorization?{params}')
-
-    @app.route('/social/linkedin/callback')
-    @login_required
-    def linkedin_callback():
-        from flask import session
-        if not current_user.is_admin:
-            return 'Admin only', 403
-        error = request.args.get('error')
-        if error:
-            return redirect(url_for('admin_users') + '?social_error=' + error)
-        code  = request.args.get('code', '')
-        state = request.args.get('state', '')
-        if state != session.pop('linkedin_oauth_state', None):
-            return 'Invalid state', 400
-        client_id     = _social_cfg('LINKEDIN_CLIENT_ID')
-        client_secret = _social_cfg('LINKEDIN_CLIENT_SECRET')
-        redirect_uri  = _social_cfg('APP_BASE_URL') + '/social/linkedin/callback'
-        # Exchange code for token
-        token_data = _urlparse.urlencode({
-            'grant_type': 'authorization_code',
-            'code': code,
-            'redirect_uri': redirect_uri,
-            'client_id': client_id,
-            'client_secret': client_secret,
-        }).encode()
-        req = _urlreq.Request('https://www.linkedin.com/oauth/v2/accessToken',
-                              data=token_data,
-                              headers={'Content-Type': 'application/x-www-form-urlencoded'})
-        try:
-            with _urlreq.urlopen(req, timeout=10) as r:
-                token_json = _json.loads(r.read())
-        except Exception as exc:
-            return f'Token exchange failed: {exc}', 500
-        access_token = token_json.get('access_token', '')
-        expires_in   = token_json.get('expires_in', 0)
-        expires_at   = datetime.utcnow() + timedelta(seconds=int(expires_in)) if expires_in else None
-        # Fetch profile
-        profile_req = _urlreq.Request(
-            'https://api.linkedin.com/v2/userinfo',
-            headers={'Authorization': f'Bearer {access_token}'}
-        )
-        try:
-            with _urlreq.urlopen(profile_req, timeout=10) as r:
-                profile = _json.loads(r.read())
-        except Exception:
-            profile = {}
-        account_name = profile.get('name') or profile.get('localizedFirstName', '') + ' ' + profile.get('localizedLastName', '')
-        account_id   = profile.get('sub', '')
-        tok = SocialToken.query.filter_by(platform='linkedin').first()
-        if not tok:
-            tok = SocialToken(platform='linkedin')
-            db.session.add(tok)
-        tok.access_token = access_token
-        tok.account_name = account_name.strip()
-        tok.account_id   = account_id
-        tok.expires_at   = expires_at
-        db.session.commit()
-        log_audit('social_connected', 'social', None, 'linkedin')
-        return redirect('/admin/users?social_connected=linkedin')
-
-    @app.route('/social/linkedin/disconnect')
-    @login_required
-    def linkedin_disconnect():
-        if not current_user.is_admin:
-            return 'Admin only', 403
-        SocialToken.query.filter_by(platform='linkedin').delete()
-        db.session.commit()
-        return redirect('/admin/users?social_disconnected=linkedin')
-
-    # ── Facebook OAuth ──────────────────────────────────────────────────── #
-
-    @app.route('/social/facebook/connect')
-    @login_required
-    def facebook_connect():
-        if not current_user.is_admin:
-            return 'Admin only', 403
-        app_id = _social_cfg('FACEBOOK_APP_ID')
-        if not app_id:
-            return 'FACEBOOK_APP_ID not set in .env', 400
-        from flask import session
-        state = _secrets.token_urlsafe(16)
-        session['facebook_oauth_state'] = state
-        redirect_uri = _social_cfg('APP_BASE_URL') + '/social/facebook/callback'
-        params = _urlparse.urlencode({
-            'client_id': app_id,
-            'redirect_uri': redirect_uri,
-            'state': state,
-            'scope': 'pages_manage_posts,pages_read_engagement,pages_show_list',
-        })
-        return redirect(f'https://www.facebook.com/dialog/oauth?{params}')
-
-    # --- Facebook OAuth integration — Kadin Lee-Smith ---
-    @app.route('/social/facebook/callback')
-    @login_required
-    def facebook_callback():
-        from flask import session
-        if not current_user.is_admin:
-            return 'Admin only', 403
-        error = request.args.get('error_message') or request.args.get('error')
-        if error:
-            return redirect('/admin/users?social_error=' + _urlparse.quote(error))
-        code  = request.args.get('code', '')
-        state = request.args.get('state', '')
-        if state != session.pop('facebook_oauth_state', None):
-            return 'Invalid state', 400
-        app_id     = _social_cfg('FACEBOOK_APP_ID')
-        app_secret = _social_cfg('FACEBOOK_APP_SECRET')
-        redirect_uri = _social_cfg('APP_BASE_URL') + '/social/facebook/callback'
-        # Exchange code for user token
-        token_url = ('https://graph.facebook.com/oauth/access_token?' +
-                     _urlparse.urlencode({'client_id': app_id, 'redirect_uri': redirect_uri,
-                                          'client_secret': app_secret, 'code': code}))
-        try:
-            with _urlreq.urlopen(token_url, timeout=10) as r:
-                token_json = _json.loads(r.read())
-        except Exception as exc:
-            return f'Token exchange failed: {exc}', 500
-        user_token = token_json.get('access_token', '')
-        # Get list of pages the user manages
-        pages_url = ('https://graph.facebook.com/v19.0/me/accounts?access_token=' + user_token)
-        try:
-            with _urlreq.urlopen(pages_url, timeout=10) as r:
-                pages_json = _json.loads(r.read())
-        except Exception:
-            pages_json = {}
-        pages = pages_json.get('data', [])
-        # Use first page, or fall back to user token
-        if pages:
-            page      = pages[0]
-            page_id   = page['id']
-            page_name = page.get('name', '')
-            page_token = page.get('access_token', user_token)
-        else:
-            page_id = page_name = ''
-            page_token = user_token
-        # Get user name
-        me_url = 'https://graph.facebook.com/v19.0/me?access_token=' + user_token
-        try:
-            with _urlreq.urlopen(me_url, timeout=10) as r:
-                me = _json.loads(r.read())
-        except Exception:
-            me = {}
-        tok = SocialToken.query.filter_by(platform='facebook').first()
-        if not tok:
-            tok = SocialToken(platform='facebook')
-            db.session.add(tok)
-        tok.access_token = page_token
-        tok.account_name = me.get('name', '')
-        tok.page_id      = page_id
-        tok.page_name    = page_name
-        db.session.commit()
-        log_audit('social_connected', 'social', None, 'facebook')
-        return redirect('/admin/users?social_connected=facebook')
-
-    @app.route('/social/facebook/disconnect')
-    @login_required
-    def facebook_disconnect():
-        if not current_user.is_admin:
-            return 'Admin only', 403
-        SocialToken.query.filter_by(platform='facebook').delete()
-        db.session.commit()
-        return redirect('/admin/users?social_disconnected=facebook')
-
-    # ── Post to Social ──────────────────────────────────────────────────── #
-
-    @app.route('/api/social/post', methods=['POST'])
-    @login_required
-    def social_post():
-        if not (current_user.is_admin or current_user.can_post_social):
-            return jsonify({'error': 'You do not have permission to post to social media.'}), 403
-        import base64 as _b64
-        from flyer_render import render_flyer_png, CANVAS_FORMATS
-        data       = request.get_json(force=True)
-        caption    = (data.get('caption') or '').strip()
-        platforms  = data.get('platforms') or []
-        template_id = data.get('template_id')
-        elements    = data.get('elements')
-        background  = data.get('background', '#ffffff')
-        bg_asset_id = data.get('bg_asset_id')
-
-        if not caption:
-            return jsonify({'error': 'Caption is required.'}), 400
-        if not platforms:
-            return jsonify({'error': 'Select at least one platform.'}), 400
-
-        # Render flyer to PNG
-        t = FlyerTemplate.query.get_or_404(template_id)
-        els = elements or t.elements or []
-        def asset_loader(asset_id):
-            try:
-                a = FlyerAsset.query.get(int(asset_id))
-                return a.data if a else None
-            except (TypeError, ValueError):
-                return None
-        _bg_id = bg_asset_id or t.bg_asset_id
-        _bg_bytes = None
-        if _bg_id:
-            try:
-                _ba = FlyerAsset.query.get(int(_bg_id))
-                if _ba:
-                    _bg_bytes = _ba.data
-            except (TypeError, ValueError):
-                pass
-        png_bytes = render_flyer_png(els, fmt=t.format, bg_color=background, asset_loader=asset_loader, bg_image_bytes=_bg_bytes)
-
-        results = {}
-
-        if 'linkedin' in platforms:
-            tok = SocialToken.query.filter_by(platform='linkedin').first()
-            if not tok:
-                results['linkedin'] = {'ok': False, 'error': 'LinkedIn not connected.'}
-            else:
-                try:
-                    results['linkedin'] = _post_linkedin(tok.access_token, tok.account_id, caption, png_bytes)
-                except Exception as exc:
-                    results['linkedin'] = {'ok': False, 'error': str(exc)}
-
-        if 'facebook' in platforms:
-            tok = SocialToken.query.filter_by(platform='facebook').first()
-            if not tok:
-                results['facebook'] = {'ok': False, 'error': 'Facebook not connected.'}
-            else:
-                try:
-                    results['facebook'] = _post_facebook(tok.access_token, tok.page_id, caption, png_bytes)
-                except Exception as exc:
-                    results['facebook'] = {'ok': False, 'error': str(exc)}
-
-        any_ok = any(v.get('ok') for v in results.values())
-        log_audit('social_post', 'social', None, None, {'platforms': platforms, 'results': results})
-        return jsonify({'results': results, 'ok': any_ok})
-
-    def _post_linkedin(access_token, author_id, caption, png_bytes):
-        import base64 as _b64
-        author_urn = f'urn:li:person:{author_id}'
-        # Step 1: register upload
-        reg_body = _json.dumps({
-            'registerUploadRequest': {
-                'recipes': ['urn:li:digitalmediaRecipe:feedshare-image'],
-                'owner': author_urn,
-                'serviceRelationships': [{'relationshipType': 'OWNER', 'identifier': 'urn:li:userGeneratedContent'}],
-            }
-        }).encode()
-        reg_req = _urlreq.Request(
-            'https://api.linkedin.com/v2/assets?action=registerUpload',
-            data=reg_body,
-            headers={'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'},
-        )
-        with _urlreq.urlopen(reg_req, timeout=15) as r:
-            reg = _json.loads(r.read())
-        upload_url = reg['value']['uploadMechanism']['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']['uploadUrl']
-        asset_urn  = reg['value']['asset']
-        # Step 2: upload image
-        up_req = _urlreq.Request(upload_url, data=png_bytes,
-                                  headers={'Authorization': f'Bearer {access_token}', 'Content-Type': 'image/png'})
-        up_req.get_method = lambda: 'PUT'
-        with _urlreq.urlopen(up_req, timeout=30):
-            pass
-        # Step 3: create post
-        post_body = _json.dumps({
-            'author': author_urn,
-            'lifecycleState': 'PUBLISHED',
-            'specificContent': {
-                'com.linkedin.ugc.ShareContent': {
-                    'shareCommentary': {'text': caption},
-                    'shareMediaCategory': 'IMAGE',
-                    'media': [{'status': 'READY', 'media': asset_urn}],
-                }
-            },
-            'visibility': {'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC'},
-        }).encode()
-        post_req = _urlreq.Request(
-            'https://api.linkedin.com/v2/ugcPosts',
-            data=post_body,
-            headers={'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json',
-                     'X-Restli-Protocol-Version': '2.0.0'},
-        )
-        with _urlreq.urlopen(post_req, timeout=15) as r:
-            result = _json.loads(r.read())
-        return {'ok': True, 'post_id': result.get('id', '')}
-
-    def _post_facebook(access_token, page_id, caption, png_bytes):
-        import io as _io
-        import email.mime.multipart as _mime_mp
-        import email.mime.base as _mime_base
-        # POST photo to /{page-id}/photos
-        boundary = _secrets.token_hex(16)
-        body  = f'--{boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n{caption}\r\n'
-        body += f'--{boundary}\r\nContent-Disposition: form-data; name="source"; filename="flyer.png"\r\nContent-Type: image/png\r\n\r\n'
-        body_bytes = body.encode() + png_bytes + f'\r\n--{boundary}--\r\n'.encode()
-        post_url = f'https://graph.facebook.com/v19.0/{page_id}/photos?access_token={access_token}'
-        fb_req = _urlreq.Request(
-            post_url, data=body_bytes,
-            headers={'Content-Type': f'multipart/form-data; boundary={boundary}'},
-        )
-        with _urlreq.urlopen(fb_req, timeout=30) as r:
-            result = _json.loads(r.read())
-        return {'ok': True, 'post_id': result.get('id', '')}
-
-    # ── Email Sequences ─────────────────────────────────────────────────── #
-
-    @app.route('/admin/sequences')
-    @login_required
-    def sequences_admin():
-        if not current_user.is_admin:
-            return redirect('/')
-        seqs = EmailSequence.query.order_by(EmailSequence.created_at.desc()).all()
-        return render_template('sequences_admin.html', sequences=seqs)
-
-    # --- Email sequence automation API — Kadin Lee-Smith ---
-    @app.route('/api/sequences', methods=['GET'])
-    @login_required
-    def list_sequences():
-        seqs = EmailSequence.query.order_by(EmailSequence.created_at.desc()).all()
-        return jsonify([s.to_dict(include_counts=True) for s in seqs])
-
-    @app.route('/api/sequences', methods=['POST'])
-    @login_required
-    def create_sequence():
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        data = request.get_json(force=True)
-        if not data.get('name') or not data.get('trigger_stage'):
-            return jsonify({'error': 'Name and trigger stage are required'}), 400
-        seq = EmailSequence(name=data['name'], trigger_stage=data['trigger_stage'])
-        db.session.add(seq)
-        db.session.commit()
-        return jsonify(seq.to_dict()), 201
-
-    @app.route('/api/sequences/<int:seq_id>', methods=['PATCH'])
-    @login_required
-    def update_sequence(seq_id):
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        seq = EmailSequence.query.get_or_404(seq_id)
-        data = request.get_json(force=True)
-        if 'name' in data:
-            seq.name = data['name']
-        if 'trigger_stage' in data:
-            seq.trigger_stage = data['trigger_stage']
-        if 'is_active' in data:
-            seq.is_active = bool(data['is_active'])
-        db.session.commit()
-        return jsonify(seq.to_dict(include_counts=True))
-
-    @app.route('/api/sequences/<int:seq_id>', methods=['DELETE'])
-    @login_required
-    def delete_sequence(seq_id):
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        seq = EmailSequence.query.get_or_404(seq_id)
-        db.session.delete(seq)
-        db.session.commit()
-        return jsonify({'ok': True})
-
-    @app.route('/api/sequences/<int:seq_id>/steps', methods=['POST'])
-    @login_required
-    def add_sequence_step(seq_id):
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        seq = EmailSequence.query.get_or_404(seq_id)
-        data = request.get_json(force=True)
-        step = EmailSequenceStep(
-            sequence_id=seq_id,
-            step_order=len(seq.steps),
-            day_offset=int(data.get('day_offset', 1)),
-            subject=data.get('subject', ''),
-            body=data.get('body', ''),
-        )
-        db.session.add(step)
-        db.session.commit()
-        return jsonify(step.to_dict()), 201
-
-    @app.route('/api/sequences/steps/<int:step_id>', methods=['PATCH'])
-    @login_required
-    def update_sequence_step(step_id):
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        step = EmailSequenceStep.query.get_or_404(step_id)
-        data = request.get_json(force=True)
-        for field in ['day_offset', 'subject', 'body']:
-            if field in data:
-                setattr(step, field, data[field])
-        db.session.commit()
-        return jsonify(step.to_dict())
-
-    @app.route('/api/sequences/steps/<int:step_id>', methods=['DELETE'])
-    @login_required
-    def delete_sequence_step(step_id):
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        step = EmailSequenceStep.query.get_or_404(step_id)
-        db.session.delete(step)
-        db.session.commit()
-        return jsonify({'ok': True})
-
-    @app.route('/api/sequences/<int:seq_id>/process-now', methods=['POST'])
-    @login_required
-    def process_sequence_now(seq_id):
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        _process_sequence_emails(app)
-        return jsonify({'ok': True})
-
-    # ── Landing Pages ───────────────────────────────────────────────────── #
-
-    @app.route('/admin/landing-pages')
-    @login_required
-    def landing_pages_admin():
-        if not current_user.is_admin:
-            return redirect('/')
-        pages = LandingPage.query.order_by(LandingPage.created_at.desc()).all()
-        return render_template('landing_pages.html', pages=pages)
-
-    @app.route('/admin/landing-pages/<int:page_id>/edit')
-    @login_required
-    def landing_page_edit(page_id):
-        if not current_user.is_admin:
-            return redirect('/')
-        page = LandingPage.query.get_or_404(page_id)
-        return render_template('landing_page_editor.html', page=page)
-
-    # --- Landing page builder + public submission handler — Kadin Lee-Smith ---
-    @app.route('/api/landing-pages', methods=['POST'])
-    @login_required
-    def create_landing_page():
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        data = request.get_json(force=True)
-        if not data.get('title'):
-            return jsonify({'error': 'Title is required'}), 400
-        import re, uuid
-        raw = data.get('slug') or re.sub(r'[^a-z0-9]+', '-', data['title'].lower()).strip('-')
-        slug = raw[:80]
-        if LandingPage.query.filter_by(slug=slug).first():
-            slug = slug[:74] + '-' + uuid.uuid4().hex[:5]
-        page = LandingPage(
-            slug=slug,
-            title=data['title'],
-            subtitle=data.get('subtitle') or None,
-            body=data.get('body') or None,
-            bg_color=data.get('bg_color', '#ffffff'),
-            text_color=data.get('text_color', '#111111'),
-            button_text=data.get('button_text', 'Get in Touch'),
-            button_color=data.get('button_color', '#AD0304'),
-            show_phone=bool(data.get('show_phone', True)),
-            show_message=bool(data.get('show_message', True)),
-            pipeline_stage=data.get('pipeline_stage') or None,
-        )
-        db.session.add(page)
-        db.session.commit()
-        return jsonify(page.to_dict()), 201
-
-    @app.route('/api/landing-pages/<int:page_id>', methods=['PATCH'])
-    @login_required
-    def update_landing_page(page_id):
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        page = LandingPage.query.get_or_404(page_id)
-        data = request.get_json(force=True)
-        for field in ['title', 'subtitle', 'body', 'bg_color', 'text_color',
-                      'button_text', 'button_color', 'pipeline_stage']:
-            if field in data:
-                setattr(page, field, data[field] or None if field in ('subtitle', 'body', 'pipeline_stage') else data[field])
-        for field in ['show_phone', 'show_message', 'is_active']:
-            if field in data:
-                setattr(page, field, bool(data[field]))
-        db.session.commit()
-        return jsonify(page.to_dict())
-
-    @app.route('/api/landing-pages/<int:page_id>', methods=['DELETE'])
-    @login_required
-    def delete_landing_page(page_id):
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        page = LandingPage.query.get_or_404(page_id)
-        db.session.delete(page)
-        db.session.commit()
-        return jsonify({'ok': True})
-
-    @app.route('/api/landing-pages/<int:page_id>/submissions')
-    @login_required
-    def get_lp_submissions(page_id):
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        subs = LandingPageSubmission.query.filter_by(page_id=page_id)\
-            .order_by(LandingPageSubmission.created_at.desc()).all()
-        return jsonify([s.to_dict() for s in subs])
-
-    @app.route('/p/<slug>')
-    def public_landing_page(slug):
-        page = LandingPage.query.filter_by(slug=slug, is_active=True).first_or_404()
-        return render_template('landing_page_public.html', page=page)
-
-    @app.route('/p/<slug>/submit', methods=['POST'])
-    def submit_landing_page(slug):
-        page = LandingPage.query.filter_by(slug=slug, is_active=True).first_or_404()
-        data = request.get_json(force=True)
-        if not data.get('name') or not data.get('email'):
-            return jsonify({'error': 'Name and email are required'}), 400
-
-        email = data['email'].strip().lower()
-        name  = data['name'].strip()
-        parts = name.rsplit(' ', 1)
-        first = parts[0]
-        last  = parts[1] if len(parts) > 1 else ''
-
-        # Match or create contact
-        contact = Contact.query.filter(
-            db.func.lower(Contact.email) == email
-        ).first()
-        if not contact:
-            contact = Contact(
-                first_name=first,
-                last_name=last,
-                email=email,
-                phone=(data.get('phone') or '').strip() or None,
-                pipeline_stage=page.pipeline_stage or None,
-            )
-            db.session.add(contact)
-        else:
-            if page.pipeline_stage and not contact.pipeline_stage:
-                contact.pipeline_stage = page.pipeline_stage
-
-        db.session.flush()
-
-        activity = Activity(
-            contact_id=contact.id,
-            activity_type='note',
-            notes=f'Submitted landing page "{page.title}"' +
-                  (f': {data["message"]}' if data.get('message') else ''),
-            created_by=None,
-        )
-        db.session.add(activity)
-
-        sub = LandingPageSubmission(
-            page_id=page.id,
-            name=name,
-            email=email,
-            phone=(data.get('phone') or '').strip() or None,
-            message=(data.get('message') or '').strip() or None,
-            contact_id=contact.id,
-        )
-        db.session.add(sub)
-        db.session.commit()
-        return jsonify({'ok': True}), 201
-
-    # ── Meeting Scheduler ───────────────────────────────────────────────── #
-
-    @app.route('/book')
-    def public_book():
-        return render_template('book.html')
-
-    @app.route('/admin/scheduler')
-    @login_required
-    def scheduler_admin():
-        if not current_user.is_admin:
-            return redirect('/')
-        rules = AvailabilityRule.query.order_by(AvailabilityRule.day_of_week).all()
-        return render_template('scheduler_admin.html', rules=rules)
-
-    # --- Appointment scheduler & booking system — Kadin Lee-Smith ---
-    @app.route('/api/scheduler/availability', methods=['GET'])
-    @login_required
-    def get_availability():
-        rules = AvailabilityRule.query.order_by(AvailabilityRule.day_of_week).all()
-        return jsonify([r.to_dict() for r in rules])
-
-    @app.route('/api/scheduler/availability', methods=['POST'])
-    @login_required
-    def save_availability():
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        data = request.get_json(force=True)
-        # data = list of {day_of_week, start_hour, end_hour, slot_minutes, enabled}
-        AvailabilityRule.query.delete()
-        for item in data:
-            if item.get('enabled'):
-                db.session.add(AvailabilityRule(
-                    day_of_week=int(item['day_of_week']),
-                    start_hour=int(item['start_hour']),
-                    end_hour=int(item['end_hour']),
-                    slot_minutes=int(item.get('slot_minutes', 30)),
-                ))
-        db.session.commit()
-        return jsonify({'ok': True})
-
-    @app.route('/api/scheduler/slots')
-    def get_slots():
-        from datetime import date as _date, time as _time, timedelta
-        date_str = request.args.get('date', '')
-        try:
-            req_date = _date.fromisoformat(date_str)
-        except (ValueError, TypeError):
-            return jsonify({'error': 'Invalid date'}), 400
-
-        dow = req_date.weekday()  # 0=Mon
-        rule = AvailabilityRule.query.filter_by(day_of_week=dow).first()
-        if not rule:
-            return jsonify([])
-
-        # Existing confirmed bookings for that date
-        booked_starts = {
-            b.start_time.strftime('%H:%M')
-            for b in Booking.query.filter_by(date=req_date, status='confirmed').all()
-        }
-
-        slots = []
-        slot_delta = timedelta(minutes=rule.slot_minutes)
-        from datetime import datetime as _dt
-        current = _dt.combine(req_date, _time(rule.start_hour, 0))
-        end_dt  = _dt.combine(req_date, _time(rule.end_hour, 0))
-        while current + slot_delta <= end_dt:
-            label = current.strftime('%H:%M')
-            if label not in booked_starts:
-                slots.append(label)
-            current += slot_delta
-
-        return jsonify(slots)
-
-    @app.route('/api/scheduler/book', methods=['POST'])
-    def create_booking():
-        from datetime import date as _date, time as _time, timedelta
-        data = request.get_json(force=True)
-        required = ['date', 'start_time', 'name', 'email']
-        missing = [f for f in required if not data.get(f)]
-        if missing:
-            return jsonify({'error': f'Missing: {", ".join(missing)}'}), 400
-
-        try:
-            req_date = _date.fromisoformat(data['date'])
-        except ValueError:
-            return jsonify({'error': 'Invalid date'}), 400
-
-        dow = req_date.weekday()
-        rule = AvailabilityRule.query.filter_by(day_of_week=dow).first()
-        if not rule:
-            return jsonify({'error': 'No availability on that day'}), 409
-
-        try:
-            h, m = map(int, data['start_time'].split(':'))
-            start = _time(h, m)
-        except Exception:
-            return jsonify({'error': 'Invalid time'}), 400
-
-        from datetime import datetime as _dt
-        end_dt = (_dt.combine(req_date, start) + timedelta(minutes=rule.slot_minutes)).time()
-
-        # Check not already booked
-        conflict = Booking.query.filter_by(
-            date=req_date, start_time=start, status='confirmed'
-        ).first()
-        if conflict:
-            return jsonify({'error': 'That slot is no longer available'}), 409
-
-        booking = Booking(
-            date=req_date,
-            start_time=start,
-            end_time=end_dt,
-            name=data['name'].strip(),
-            email=data['email'].strip().lower(),
-            phone=(data.get('phone') or '').strip() or None,
-            notes=(data.get('notes') or '').strip() or None,
-        )
-        db.session.add(booking)
-        db.session.commit()
-
-        # Send confirmation email
-        try:
-            sg_key = os.environ.get('SENDGRID_API_KEY') or (
-                os.environ.get('SMTP_PASSWORD', '').startswith('SG.') and os.environ.get('SMTP_PASSWORD')
-            ) or None
-            from_email = os.environ.get('MAIL_FROM', os.environ.get('SMTP_USERNAME', ''))
-            if sg_key and from_email:
-                day_label = req_date.strftime('%A, %B %-d, %Y')
-                time_label = _dt.combine(req_date, start).strftime('%-I:%M %p')
-                html = (
-                    f'<p>Hi {booking.name},</p>'
-                    f'<p>Your meeting has been confirmed for '
-                    f'<strong>{day_label} at {time_label}</strong>.</p>'
-                    f'<p>If you need to cancel or reschedule, please reply to this email.</p>'
-                    f'<p>- Our Team</p>'
-                )
-                import json as _json2
-                import urllib.request as _urlreq2
-                payload = {
-                    'personalizations': [{'to': [{'email': booking.email, 'name': booking.name}]}],
-                    'from': {'email': from_email},
-                    'subject': f'Meeting confirmed - {day_label} at {time_label}',
-                    'content': [{'type': 'text/html', 'value': html}],
-                }
-                req = _urlreq2.Request(
-                    'https://api.sendgrid.com/v3/mail/send',
-                    data=_json2.dumps(payload).encode(),
-                    headers={
-                        'Authorization': f'Bearer {sg_key}',
-                        'Content-Type': 'application/json',
-                    },
-                    method='POST',
-                )
-                _urlreq2.urlopen(req, timeout=10)
-        except Exception:
-            pass  # Booking is saved; email failure is non-fatal
-
-        return jsonify({'ok': True, 'booking': booking.to_dict()}), 201
-
-    @app.route('/api/scheduler/bookings')
-    @login_required
-    def list_bookings():
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        from datetime import date as _date
-        upcoming = Booking.query.filter(
-            Booking.date >= _date.today()
-        ).order_by(Booking.date, Booking.start_time).all()
-        past = Booking.query.filter(
-            Booking.date < _date.today()
-        ).order_by(Booking.date.desc(), Booking.start_time).limit(50).all()
-        return jsonify({'upcoming': [b.to_dict() for b in upcoming],
-                        'past': [b.to_dict() for b in past]})
-
-    @app.route('/api/scheduler/bookings/<int:booking_id>', methods=['PATCH'])
-    @login_required
-    def update_booking(booking_id):
-        if not current_user.is_admin:
-            return jsonify({'error': 'Admins only'}), 403
-        booking = Booking.query.get_or_404(booking_id)
-        data = request.get_json(force=True)
-        if 'status' in data:
-            booking.status = data['status']
-        db.session.commit()
-        return jsonify(booking.to_dict())
 
     return app
 

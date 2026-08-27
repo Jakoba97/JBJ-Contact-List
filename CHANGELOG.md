@@ -6,6 +6,132 @@ full diffs); it's the "what would a non-technical teammate need to know"
 summary, especially for anything that affects data, security, or how
 staff use the app day to day.
 
+## 2026-08-27 — Add Organization / Add Group forms now match Add Contact
+
+The nice form styling on "Add Contact" (bold labels, full-width rounded
+inputs) turned out to be scoped to a `#contactForm`-only CSS rule, so
+"Add Organization" and "Add Group" were falling back to unstyled browser
+defaults. Added a shared `.modal-form` class carrying the same rules and
+applied it to both, plus matched their structure to Add Contact's exactly
+(`<h2>` title, `<label>Text<br><input></label>` pattern, a Save/Close
+button pair, and the same amber `.flag.flag-warn` box for validation/error
+messages instead of each one inventing its own).
+
+## 2026-08-27 — Group export, sidebar reorder, "Add Group"
+
+Added an Export dropdown (Copy Emails / Download CSV / Download Word
+Doc) to each group's detail view, scoped to just that group's members --
+`filtered_contacts_query` and the three `/api/export*` routes now accept
+a `group_id` param the same way they already accept `tag`/`county`/etc.
+While adding it, fixed a pre-existing bug in `/api/export/docx`: the
+downloaded filename crashed (`AttributeError`) whenever a tag or
+organization-category filter was active, because `tag`/`org_tag` are
+lists (from `parse_multi_param`) but the filename code called
+`.replace()` on them directly as if they were a string.
+
+Reordered the sidebar per request: Contacts, Organizations, Groups, then
+Add Contact, Add Organization, Add Group, then the existing admin
+section unchanged below. Added the "Add Group" button itself (opens the
+same create-group form as the Groups tab's "New Group" button).
+
+## 2026-08-27 — Alphabetical sort + new Groups feature
+
+The People table (and the CSV export, to match) now sorts alphabetically
+by first name instead of newest-added-first.
+
+Added **Groups**: a new `Group` model (name, description, and a list of
+member contact IDs) for hand-picked contact lists that don't map to an
+organization or a tag -- e.g. "2026 Gala Invitees." Reachable two ways,
+per request: a "Groups" link in the sidebar (right under Organizations)
+and a third "Groups" tab next to People/Organizations on the main
+Contact Management page. The Groups tab has its own "New Group" button
+(name + description) and hides the Filters/Export/Trash controls, which
+don't apply to it. Clicking a group opens the same shared detail modal
+used for contacts/organizations, with a members list (remove button per
+contact) and a live search-and-add picker to build the group out.
+New endpoints: `GET/POST /api/groups`, `GET/PUT/DELETE /api/groups/<id>`,
+`POST /api/groups/<id>/contacts`, `DELETE /api/groups/<id>/contacts/<id>`.
+
+## 2026-08-26 — Contact Management redesign: table view, filter panel, detail modal
+
+Reworked the People view from a card grid to a single-line-per-contact
+table (Name/Organization/Title/Phone/Email columns, a toggleable star for
+favorites) and removed the always-visible filters sidebar in favor of a
+"Filters" popover (Tags/Counties/Organizations/Follow-up/Favorites, with
+an Apply/Clear footer) opened from the toolbar. Added a new "Organization"
+filter, backed by a new `GET /api/contact-organizations` endpoint and an
+`organization` filter param on `/api/contacts` and the three export
+routes. Clicking a contact's name now opens a modal with their full
+detail (tags, notes, pipeline stage, tasks) and the outreach activity
+log -- each entry has a date and a notes box, same as before, just now
+in a modal instead of a side panel. The Organizations (grouped-by-org)
+view keeps its card layout and now opens the same detail modal instead
+of a side panel too. The toolbar also grew an icon-only Trash button and
+two always-visible counts (Total Contacts, Total Organizations),
+replacing the old view-dependent stat cards. Also removed the grid/list
+layout toggle (the table is the only People-view layout now) and the
+"Need Review" quick-filter stat card.
+
+While rebuilding this, found and fixed two accidental deletions from
+the "Removed Email & Event Management" change below: `bindSendCampaign`'s
+deletion in `app.js` had also swallowed the neighboring Pipeline-board
+functions (`loadPipelineData`, `movePipelineContact`, `pipelineStageOpts`,
+`pipelineListRowHtml`, `renderPipelineList`, `pipelineStageSectionHtml`,
+and the `PIPELINE_STAGES`/`_pipelineData`/`_pipelineStageFilter`
+declarations), and the `campaign_send` deletion in `app.py` had swallowed
+the neighboring `_task_urgency` helper the Tasks routes depend on -- both
+would have thrown at runtime the moment a contact detail was viewed or a
+Tasks route was hit. `/api/generate-flyer` (Create Flyer/Post) also broke
+in the same change since it called a Flyer Builder helper
+(`_valid_flyer_formats`) that got removed along with `flyer_render.py`;
+replaced with an inline format check. Caught via an actual browser pass
+(Playwright) after the fact -- worth doing that *before* declaring UI or
+cross-cutting deletions done, not just linting/compiling.
+
+## 2026-08-26 — Removed Email & Event Management entirely
+
+Removed the whole "Email & Events" tab and everything under it: Email
+Builder, Flyer Builder, Campaign History, Email Sequences, Landing Pages,
+and the Meeting Scheduler -- their routes, models (`EmailTemplate`,
+`FlyerTemplate`, `FlyerAsset`, `EmailSend`, `EmailEvent`, `SocialToken`,
+`EmailSequence`/`EmailSequenceStep`/`EmailSequenceEnrollment`,
+`LandingPage`/`LandingPageSubmission`, `AvailabilityRule`/`Booking`),
+templates, and JS. Only Contact Management and Admin remain in the top
+nav, per request. Also removed: the SMTP/SendGrid email-sending layer,
+the LinkedIn/Facebook social-posting integration (and the "Social
+Connections" section on Manage Users), the APScheduler background job
+that processed email sequences, and the now-dead `SMTP_*`/`LINKEDIN_*`/
+`FACEBOOK_*`/`APP_BASE_URL` config and `requests`/`APScheduler` deps.
+
+Two Contact-Management features that happened to live under the same
+permission flags were kept and re-gated: **Draft Email** (AI email
+drafting scoped to the current filter) and **Create Flyer/Post** (the
+one-click flyer/social-post generator) -- both now show whenever
+`can_draft_email` is set, since their own "Open in Email/Flyer Builder"
+buttons no longer have anywhere to go. Case Studies is unaffected and no
+longer gated behind the removed `can_access_email_events` flag.
+
+Discovered but not fixed (pre-existing, unrelated to this change): the
+test suite fails on a fresh checkout because `_seed_demo_contacts()` runs
+unconditionally on any empty database, including pytest's temp SQLite
+db, seeding 60 fake contacts before test assertions run. Also saw
+Windows-only `PermissionError: WinError 32` failures tearing down
+pytest's temp db files, unrelated to any app code.
+
+## 2026-08-26 — Removed the Proposal Manager
+
+Removed the Proposal Manager feature entirely: the `/proposals` routes and
+`Proposal` model, the "Proposal Manager" nav tab/dashboard tile across every
+page, the per-user `can_access_proposals` permission (and its checkbox/column
+in Manage Users), and the AI proposal-draft endpoint. Case Studies is a
+separate feature and is unaffected — it's still at `/case-studies`, just no
+longer gated behind the removed permission flag (it's open to everyone
+logged in, per how it already behaved on the backend). Removing the flag
+from the `User` model means new databases won't create that column; existing
+production databases will still have an unused `proposals` table and
+`can_access_proposals` column left over -- harmless, but a manual migration
+would be needed to actually drop them.
+
 ## 2026-06-30 — Fixed Send failing in production with a database error
 
 Sending worked locally but failed on Render with "Could not send" and a

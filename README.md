@@ -7,24 +7,34 @@ See `CHANGELOG.md` for a running history of what's changed and why.
 
 ## What it does
 
-- **People view** — every individual contact (name, org, title, phone,
-  email, county, tags), searchable and filterable.
+- **People view** — one row per contact in a table (Name, Organization,
+  Title, Phone, Email), alphabetical by first name; searchable and
+  filterable. Clicking a name opens the full detail view in a modal:
+  contact info, assigned tag, and the outreach activity log.
 - **Organizations view** — the outreach checklist grouped by category and
   organization, cross-referenced against People by organization name, so
-  everyone who shares an organization shows up together.
+  everyone who shares an organization shows up together. Also opens into
+  the same detail modal as People.
+- **Groups** — hand-picked contact lists with a name and description
+  (e.g. "2026 Gala Invitees") that don't map to an organization or a tag.
+  A third tab next to People/Organizations (also reachable from the
+  sidebar); create a group, then search-and-add or remove contacts right
+  from its detail view. Same Export options as the main toolbar (CSV,
+  Word doc, copy emails), scoped to just that group's members.
+- **Filters** — a popover (opened from the toolbar's Filters button, with
+  a badge showing how many are active) covering Tags, Counties,
+  Organization, Follow-up status, and Favorites; changes apply once you
+  hit Apply, or Clear Filters to reset.
 - **Outreach activity log** — per-contact and per-organization history of
-  who reached out, when, and what was discussed, so staff can check
-  whether someone's already been contacted before reaching out again.
+  who reached out, when, and what was discussed (each entry has a date
+  and a notes box), so staff can check whether someone's already been
+  contacted before reaching out again.
 - **"Needs Follow-up" filter** — narrow the People view to contacts never
   contacted, or not contacted in 30/60/90+ days; works with search,
   exports, and Draft Email like any other filter.
-- **Favorites** — star a contact to flag it for the whole team (a shared
-  flag, not personal/per-login); a "Favorites" toggle in the toolbar
-  filters down to just those, same as the other filters.
-- **Outreach recency on cards** — each card in the People view shows how
-  long it's been since the last outreach of any kind, and separately
-  since the last one logged as "Email," without opening the full detail
-  panel.
+- **Favorites** — star a contact directly from the People table to flag
+  it for the whole team (a shared flag, not personal/per-login); a
+  "Favorites" filter narrows down to just those.
 - **Analytics dashboard** (admin-only) — outreach trends, breakdowns by
   employee/channel/county, and admin activity, built from the activity
   and audit logs already being collected.
@@ -57,21 +67,6 @@ See `CHANGELOG.md` for a running history of what's changed and why.
   adding, editing, and deleting is admin-only. Native Google Docs must
   be exported to .docx or PDF first (Drive doesn't expose a way to read
   a native Doc's content without the Drive API).
-- **Email builder** (`/email-builder`) — build your own email by hand,
-  alongside (not instead of) the AI Draft Email tool: a single compose
-  pane with a Gmail-style formatting toolbar (bold/italic/underline,
-  lists, alignment, text color, headings, links, images, a CTA button,
-  dividers, the company logo) -- type and format directly, no
-  drag-and-drop. Toolbar buttons highlight when the cursor is in matching
-  formatting. Preview at desktop/mobile width and Save. A Send button
-  sends the current content to one typed address, with up to 5 file
-  attachments (15MB total) -- requires `SMTP_*` env vars (see Setup
-  above); without them, Send returns a clear "not configured" error
-  rather than failing silently. Open to everyone logged in, same as Draft
-  Email/Create Flyer. Still in progress -- bulk-sending to a filtered
-  contact list and a real flyer/canvas builder are coming in later steps; see
-  `CHANGELOG.md`.
-
 ## Setup
 
 ```bash
@@ -88,21 +83,7 @@ SECRET_KEY=<random value, signs login sessions>
 ANTHROPIC_API_KEY=<only needed for the Draft Email and Create Flyer features>
 OPENAI_API_KEY=<only needed for the Create Flyer feature's background image>
 SENTRY_DSN=<optional -- error monitoring; app runs fine without it set>
-SMTP_HOST=<only needed to send from the Email Builder -- works without it, just can't send>
-SMTP_PORT=<defaults to 587>
-SMTP_USERNAME=<your SMTP provider's username/API key>
-SMTP_PASSWORD=<your SMTP provider's password/API key secret>
-SMTP_FROM_EMAIL=<the address mail appears to come from -- defaults to SMTP_USERNAME>
-SMTP_FROM_NAME=<the display name mail appears to come from -- defaults to "JBJ Management">
-SMTP_USE_TLS=<defaults to true>
 ```
-
-`SMTP_*` is provider-agnostic by design -- point it at SendGrid, Mailgun,
-Postmark, or any other SMTP relay's credentials without changing code.
-Plain personal-account SMTP (e.g. a Gmail account) will work for testing,
-but isn't recommended for real outreach: without a dedicated transactional
-provider's sender reputation, mail to external recipients (elected
-officials, organizations, etc.) is much more likely to land in spam.
 
 Generate a `SECRET_KEY` with `python3 -c "import secrets; print(secrets.token_hex(32))"`.
 
@@ -154,6 +135,11 @@ itself, no terminal access needed.
   an Organizations-view category filter are deliberately different lists.
 - `Activity` — a logged outreach touchpoint, tied to a contact or an
   organization (or both).
+- `Group` — a hand-picked contact list (name, description). Membership
+  (`contact_ids`) is a JSON list of contact IDs rather than a join table,
+  matching how `Contact.lists` already stores per-contact email-list
+  membership — fine at this scale, and keeps membership changes to a
+  single-row update.
 - `User` — employee logins. Passwords are hashed (Werkzeug), never stored
   in plain text.
 - `CaseStudy` — a past-project writeup (title, client, sector,

@@ -38,60 +38,37 @@
         </a>
       </li>
       <li>
+        <a href="/community-directory" class="toolbar-nav-link" title="Organizations">
+          <i class="fas fa-sitemap"></i>
+          <span class="toolbar-label">Organizations</span>
+        </a>
+      </li>
+      <li>
+        <a href="#groups" class="toolbar-nav-link" title="Groups">
+          <i class="fas fa-layer-group"></i>
+          <span class="toolbar-label">Groups</span>
+        </a>
+      </li>
+
+      <li class="toolbar-divider" aria-hidden="true"></li>
+
+      <li>
         <button class="toolbar-nav-link" id="addContactBtn" title="Add Contact">
           <i class="fas fa-user-plus"></i>
           <span class="toolbar-label">Add Contact</span>
         </button>
       </li>
       <li>
-        <button class="toolbar-nav-link" id="tasksBtn" title="Tasks">
-          <i class="fas fa-list-check"></i>
-          <span class="toolbar-label">Tasks</span>
-          <span id="taskBadge" class="toolbar-badge" style="display:none;"></span>
+        <button class="toolbar-nav-link" id="addOrgBtn" title="Add Organization">
+          <i class="fas fa-people-group"></i>
+          <span class="toolbar-label">Add Organization</span>
         </button>
       </li>
       <li>
-        <button class="toolbar-nav-link" id="pipelineBtn" title="Pipeline">
-          <i class="fas fa-diagram-project"></i>
-          <span class="toolbar-label">Pipeline</span>
+        <button class="toolbar-nav-link" id="addGroupBtn" title="Add Group">
+          <i class="fas fa-folder-plus"></i>
+          <span class="toolbar-label">Add Group</span>
         </button>
-      </li>
-
-      <li class="toolbar-divider" aria-hidden="true"></li>
-
-      {% if current_user.is_admin or current_user.can_access_email_events %}
-      <li>
-        <a href="/email-events" class="toolbar-nav-link" title="Email &amp; Events">
-          <i class="fas fa-envelope-open-text"></i>
-          <span class="toolbar-label">Email &amp; Events</span>
-        </a>
-      </li>
-      <li>
-        <a href="/flyer-builder" class="toolbar-nav-link" title="Flyer Builder">
-          <i class="fas fa-image"></i>
-          <span class="toolbar-label">Flyer Builder</span>
-        </a>
-      </li>
-      {% endif %}
-      {% if current_user.is_admin or current_user.can_access_proposals %}
-      <li>
-        <a href="/proposals" class="toolbar-nav-link" title="Proposal Manager">
-          <i class="fas fa-file-contract"></i>
-          <span class="toolbar-label">Proposals</span>
-        </a>
-      </li>
-      <li>
-        <a href="/case-studies" class="toolbar-nav-link" title="Case Studies">
-          <i class="fas fa-book-open"></i>
-          <span class="toolbar-label">Case Studies</span>
-        </a>
-      </li>
-      {% endif %}
-      <li>
-        <a href="/community-directory" class="toolbar-nav-link" title="Community Directory">
-          <i class="fas fa-sitemap"></i>
-          <span class="toolbar-label">Community</span>
-        </a>
       </li>
 
       {% if current_user.is_admin %}
@@ -118,30 +95,6 @@
         <a href="/admin/analytics" class="toolbar-nav-link" title="Analytics">
           <i class="fas fa-chart-column"></i>
           <span class="toolbar-label">Analytics</span>
-        </a>
-      </li>
-      <li>
-        <a href="/campaign-history" class="toolbar-nav-link" title="Campaign History">
-          <i class="fas fa-envelope-open-text"></i>
-          <span class="toolbar-label">Campaign History</span>
-        </a>
-      </li>
-      <li>
-        <a href="/admin/scheduler" class="toolbar-nav-link" title="Meeting Scheduler">
-          <i class="fas fa-calendar-check"></i>
-          <span class="toolbar-label">Meeting Scheduler</span>
-        </a>
-      </li>
-      <li>
-        <a href="/admin/landing-pages" class="toolbar-nav-link" title="Landing Pages">
-          <i class="fas fa-file-circle-plus"></i>
-          <span class="toolbar-label">Landing Pages</span>
-        </a>
-      </li>
-      <li>
-        <a href="/admin/sequences" class="toolbar-nav-link" title="Email Sequences">
-          <i class="fas fa-envelope-circle-check"></i>
-          <span class="toolbar-label">Email Sequences</span>
         </a>
       </li>
       {% endif %}
@@ -185,18 +138,6 @@
             <i class="fas fa-address-book"></i>
             <span>Contact Management</span>
           </button>
-          {% if current_user.is_admin or current_user.can_access_email_events %}
-          <a href="/email-events" class="top-tab">
-            <i class="fas fa-envelope-open-text"></i>
-            <span>Email &amp; Events</span>
-          </a>
-          {% endif %}
-          {% if current_user.is_admin or current_user.can_access_proposals %}
-          <a href="/proposals" class="top-tab">
-            <i class="fas fa-file-contract"></i>
-            <span>Proposal Manager</span>
-          </a>
-          {% endif %}
           {% if current_user.is_admin %}
           <a href="/admin" class="top-tab">
             <i class="fas fa-gear"></i>
@@ -243,7 +184,7 @@
             <p class="hero-subtitle">Contact Hub</p>
           </div>
 
-          <!-- Three section entry cards -->
+          <!-- Section entry cards -->
           <div class="hero-section-grid">
             <div class="section-hero-card">
               <div class="section-card-icon-wrap">
@@ -256,31 +197,6 @@
               </button>
             </div>
 
-            {% if current_user.is_admin or current_user.can_access_email_events %}
-            <div class="section-hero-card">
-              <div class="section-card-icon-wrap">
-                <i class="fas fa-envelope-open-text"></i>
-              </div>
-              <h3 class="section-card-title">Email &amp; Event Management</h3>
-              <p class="section-card-desc">Build emails, send campaigns, design flyers, and manage event outreach.</p>
-              <a href="/email-events" class="btn btn-hero section-card-btn">
-                Enter <span aria-hidden="true">→</span>
-              </a>
-            </div>
-            {% endif %}
-
-            {% if current_user.is_admin or current_user.can_access_proposals %}
-            <div class="section-hero-card">
-              <div class="section-card-icon-wrap">
-                <i class="fas fa-file-contract"></i>
-              </div>
-              <h3 class="section-card-title">Proposal Manager</h3>
-              <p class="section-card-desc">Create, manage, and share case studies and proposals with clients.</p>
-              <a href="/proposals" class="btn btn-hero section-card-btn">
-                Enter <span aria-hidden="true">→</span>
-              </a>
-            </div>
-            {% endif %}
           </div>
 
 
@@ -298,19 +214,50 @@
             <label for="searchInput" class="sr-only">Search</label>
             <input id="searchInput" aria-label="Search" placeholder="Search by Name, Organization, Title, or Email..." />
             <div class="view-toggle" role="group" aria-label="View">
-              <button id="viewPeopleBtn" class="view-toggle-btn active" type="button"><i class="fas fa-address-book"></i> People</button>
+              <button id="viewPeopleBtn" class="view-toggle-btn active" type="button"><i class="fas fa-address-book"></i> Contacts</button>
               <button id="viewOrgBtn" class="view-toggle-btn" type="button"><i class="fas fa-building"></i> Organizations</button>
-              <button id="viewDeletedBtn" class="view-toggle-btn" type="button" title="Recently deleted contacts"><i class="fas fa-trash-can"></i> Trash</button>
-            </div>
-            <div class="view-toggle" role="group" aria-label="Layout" style="margin-left:4px;">
-              <button id="layoutGridBtn" class="view-toggle-btn active" type="button" title="Grid view"><i class="fas fa-grip"></i></button>
-              <button id="layoutListBtn" class="view-toggle-btn" type="button" title="List view"><i class="fas fa-list"></i></button>
+              <button id="viewGroupsBtn" class="view-toggle-btn" type="button"><i class="fas fa-layer-group"></i> Groups</button>
             </div>
             <div class="search-controls">
               <div class="control-group" role="group" aria-label="Actions">
                 <button id="searchBtn" class="btn btn-primary"><i class="fas fa-magnifying-glass"></i> Search</button>
+                <button id="newGroupBtn" class="btn btn-primary" type="button" style="display:none;"><i class="fas fa-plus"></i> New Group</button>
+                <div class="export-wrap" id="filterMenuWrap">
+                  <button id="filterMenuBtn" class="btn"><i class="fas fa-filter"></i> Filters <span id="filterCountBadge" class="filter-count-badge" style="display:none;"></span></button>
+                  <div id="filterMenu" class="export-menu filter-menu-panel" style="display:none;">
+                    <div class="filter-section">
+                      <h4>Tags <span id="tagFilterLabel" class="muted"></span></h4>
+                      <div id="tagFilterMenu" class="filter-option-list"></div>
+                    </div>
+                    <div class="filter-section">
+                      <h4>Counties <span id="countyFilterLabel" class="muted"></span></h4>
+                      <div id="countyFilterMenu" class="filter-option-list"></div>
+                    </div>
+                    <div class="filter-section" id="orgFilterSection">
+                      <h4>Organizations <span id="orgFilterLabel" class="muted"></span></h4>
+                      <div id="orgFilterMenu" class="filter-option-list"></div>
+                    </div>
+                    <div class="filter-section" id="followupFilterSection">
+                      <h4>Follow-up</h4>
+                      <div class="filter-option-list">
+                        <label class="filter-option"><input type="radio" name="followupRadio" value="" checked><span>All Contacts</span></label>
+                        <label class="filter-option"><input type="radio" name="followupRadio" value="never"><span>Never Contacted</span></label>
+                        <label class="filter-option"><input type="radio" name="followupRadio" value="30"><span>No Contact in 30+ Days</span></label>
+                        <label class="filter-option"><input type="radio" name="followupRadio" value="60"><span>No Contact in 60+ Days</span></label>
+                        <label class="filter-option"><input type="radio" name="followupRadio" value="90"><span>No Contact in 90+ Days</span></label>
+                      </div>
+                    </div>
+                    <div class="filter-section" id="favoritesFilterSection">
+                      <label class="filter-option"><input type="checkbox" id="favoritesOnlyCheckbox"><span>Favorites Only</span></label>
+                    </div>
+                    <div class="filter-menu-footer">
+                      <button id="applyFiltersBtn" class="btn btn-primary btn-sm" type="button"><i class="fas fa-check"></i> Apply</button>
+                      <button id="clearFiltersBtn" class="btn btn-sm" type="button">Clear Filters</button>
+                    </div>
+                  </div>
+                </div>
                 {% if current_user.is_admin or current_user.can_export_contacts %}
-                <div class="export-wrap">
+                <div class="export-wrap" id="exportMenuWrap">
                   <button id="exportMenuBtn" class="btn"><i class="fas fa-download"></i> Export <i class="fas fa-chevron-down" style="font-size:11px;"></i></button>
                   <div id="exportMenu" class="export-menu" style="display:none;">
                     <button id="exportCopyEmails" class="export-menu-item"><i class="fas fa-envelope"></i> Copy Emails (for mass email)</button>
@@ -319,22 +266,7 @@
                   </div>
                 </div>
                 {% endif %}
-                {% if current_user.is_admin or current_user.can_draft_email or current_user.can_send_email or current_user.can_access_email_events %}
-                <div class="export-wrap">
-                  <button id="toolsMenuBtn" class="btn"><i class="fas fa-wand-magic-sparkles"></i> AI Tools <i class="fas fa-chevron-down" style="font-size:11px;"></i></button>
-                  <div id="toolsMenu" class="export-menu" style="display:none;">
-                    {% if current_user.is_admin or current_user.can_draft_email %}
-                    <button id="draftEmailBtn" class="export-menu-item"><i class="fas fa-wand-magic-sparkles"></i> Draft Email</button>
-                    {% endif %}
-                    {% if current_user.is_admin or current_user.can_send_email %}
-                    <button id="sendCampaignBtn" class="export-menu-item"><i class="fas fa-paper-plane"></i> Send Campaign</button>
-                    {% endif %}
-                    {% if current_user.is_admin or current_user.can_access_email_events %}
-                    <button id="createFlyerBtn" class="export-menu-item"><i class="fas fa-image"></i> Create Flyer/Post</button>
-                    {% endif %}
-                  </div>
-                </div>
-                {% endif %}
+                <button id="viewDeletedBtn" class="btn icon-only-btn" type="button" title="Trash"><i class="fas fa-trash-can"></i></button>
               </div>
             </div>
           </div>
@@ -342,19 +274,15 @@
             <div class="quick-stats" id="quickStats">
               <div class="stat-card stat-neutral">
                 <div class="stat-icon"><i class="fas fa-users"></i></div>
-                <div class="stat-body"><span class="num" id="statTotal">-</span><span class="label" id="statTotalLabel">Total Contacts</span></div>
+                <div class="stat-body"><span class="num" id="statTotal">-</span><span class="label">Total Contacts</span></div>
               </div>
-              <div class="stat-card stat-amber" id="statIncompleteCard" style="cursor:pointer;" title="Click to show contacts with no email or phone">
-                <div class="stat-icon"><i class="fas fa-circle-exclamation"></i></div>
-                <div class="stat-body"><span class="num" id="statIncomplete">-</span><span class="label" id="statIncompleteLabel">Need Review</span></div>
-              </div>
-              <div class="stat-card stat-blue" id="statOrgsCard">
+              <div class="stat-card stat-blue">
                 <div class="stat-icon"><i class="fas fa-building"></i></div>
-                <div class="stat-body"><span class="num" id="statOrgs">-</span><span class="label">Organizations</span></div>
+                <div class="stat-body"><span class="num" id="statOrgs">-</span><span class="label">Total Organizations</span></div>
               </div>
-              <div class="stat-card stat-green" id="statCompleteCard">
-                <div class="stat-icon"><i class="fas fa-circle-check"></i></div>
-                <div class="stat-body"><span class="num" id="statComplete">-</span><span class="label">% Complete</span></div>
+              <div class="stat-card stat-green">
+                <div class="stat-icon"><i class="fas fa-layer-group"></i></div>
+                <div class="stat-body"><span class="num" id="statGroups">-</span><span class="label">Total Groups</span></div>
               </div>
             </div>
           </div>
@@ -364,51 +292,7 @@
     </header><!-- /.site-header -->
 
     <main class="container" id="mainContent" style="display:none;">
-      <div class="app-layout">
-        <aside class="filters-sidebar">
-          <div class="filters-scroll">
-            <h3 class="filters-title">Filter By</h3>
-
-            <div class="filter-section">
-              <h4>Tags <span id="tagFilterLabel" class="muted"></span></h4>
-              <div id="tagFilterMenu" class="filter-option-list"></div>
-            </div>
-
-            <div class="filter-section">
-              <h4>Counties <span id="countyFilterLabel" class="muted"></span></h4>
-              <div id="countyFilterMenu" class="filter-option-list"></div>
-            </div>
-
-            <div class="filter-section">
-              <h4>Follow-up</h4>
-              <div class="filter-option-list">
-                <label class="filter-option"><input type="radio" name="followupRadio" value="" checked><span>All Contacts</span></label>
-                <label class="filter-option"><input type="radio" name="followupRadio" value="never"><span>Never Contacted</span></label>
-                <label class="filter-option"><input type="radio" name="followupRadio" value="30"><span>No Contact in 30+ Days</span></label>
-                <label class="filter-option"><input type="radio" name="followupRadio" value="60"><span>No Contact in 60+ Days</span></label>
-                <label class="filter-option"><input type="radio" name="followupRadio" value="90"><span>No Contact in 90+ Days</span></label>
-              </div>
-            </div>
-
-            <div class="filter-section">
-              <label class="filter-option"><input type="checkbox" id="favoritesOnlyCheckbox"><span>Favorites Only</span></label>
-            </div>
-          </div>
-
-          <button id="applyFiltersBtn" class="btn btn-primary filters-apply-btn"><i class="fas fa-magnifying-glass"></i> Apply Filters</button>
-        </aside>
-
-        <div class="results-and-detail">
-          <section id="results" class="results-grid" aria-live="polite"></section>
-
-          <aside id="contactDetail" class="contact-detail" style="display:none;" aria-live="polite">
-            <div class="detail-empty">
-              <div class="photo-placeholder">No contact selected</div>
-              <div style="padding:12px;text-align:center;color:var(--muted)">Select a contact to view a quick profile here - click <strong>Edit</strong> to open the full editor.</div>
-            </div>
-          </aside>
-        </div>
-      </div>
+      <section id="results" class="contacts-table-wrap" aria-live="polite"></section>
 
       <nav class="pagination" aria-label="Pagination">
         <button id="prevPage" class="page-btn"><i class="fas fa-chevron-left"></i> Previous</button>
@@ -423,6 +307,24 @@
       <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
         <button id="closeModal" class="close">×</button>
         <div id="modalBody"></div>
+      </div>
+    </div>
+
+    <div id="addOrgModal" class="modal" style="display:none;">
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="addOrgTitle">
+        <button id="closeAddOrgModal" class="close">×</button>
+        <h2 id="addOrgTitle">Add Organization</h2>
+        <form id="addOrgForm" class="modal-form">
+          <label>Organization name<br><input id="addOrgName" type="text" placeholder="e.g. Dallas Regional Chamber" /></label>
+          <label>Category<br><input id="addOrgTag" type="text" list="addOrgTagOptions" placeholder="e.g. Dallas Civic" autocomplete="off" /></label>
+          <datalist id="addOrgTagOptions"></datalist>
+          <label>Notes<br><textarea id="addOrgNotes" rows="3" placeholder="Anything worth noting about this organization"></textarea></label>
+          <div id="addOrgStatus" class="flag flag-warn" style="display:none;margin-top:10px;"></div>
+          <div style="margin-top:10px">
+            <button id="addOrgSaveBtn" type="button" class="btn btn-primary"><i class="fas fa-check"></i> Save</button>
+            <button id="closeAddOrgBtn" type="button" class="btn">Close</button>
+          </div>
+        </form>
       </div>
     </div>
 
@@ -445,39 +347,6 @@
           </div>
         </div>
         <div id="tasksPanelContent" class="tasks-panel-content">Loading…</div>
-      </div>
-    </div>
-
-    <div id="campaignModal" class="modal" style="display:none;">
-      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="campaignTitle">
-        <button id="closeCampaignModal" class="close">×</button>
-        <h3 id="campaignTitle"><i class="fas fa-paper-plane"></i> Send Campaign</h3>
-        <p id="campaignAudience" class="muted" style="margin-bottom:12px;"></p>
-
-        <div id="campaignStep1">
-          <label for="campaignPrompt">What's this email about?</label>
-          <textarea id="campaignPrompt" rows="3" placeholder="e.g. Invite this group to a community forum next month"></textarea>
-          <label for="campaignCaseStudy" style="margin-top:10px;display:block;">Reference a case study (optional)</label>
-          <select id="campaignCaseStudy"><option value="">None</option></select>
-          <div style="display:flex;gap:8px;margin-top:10px;">
-            <button id="campaignGenerateBtn" class="btn btn-primary"><i class="fas fa-wand-magic-sparkles"></i> Generate Draft</button>
-          </div>
-          <div id="campaignGenStatus" class="muted" style="margin-top:8px;"></div>
-        </div>
-
-        <div id="campaignStep2" style="display:none;margin-top:4px;">
-          <label for="campaignSubject">Subject</label>
-          <input id="campaignSubject" type="text" style="width:100%;padding:9px 12px;border-radius:8px;border:1px solid rgba(148,153,156,0.4);font-size:14px;font-family:inherit;margin-bottom:8px;" placeholder="Email subject" />
-          <label for="campaignBody">Body</label>
-          <textarea id="campaignBody" rows="12" placeholder="Email body…"></textarea>
-          <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
-            <button id="campaignSendBtn" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Send</button>
-            <button id="campaignBackBtn" class="btn"><i class="fas fa-arrow-left"></i> Edit prompt</button>
-            <button class="btn" title="Undo (Ctrl+Z)" onclick="document.getElementById('campaignBody').focus();document.execCommand('undo')"><i class="fas fa-rotate-left"></i></button>
-            <button class="btn" title="Redo (Ctrl+Y)" onclick="document.getElementById('campaignBody').focus();document.execCommand('redo')"><i class="fas fa-rotate-right"></i></button>
-            <span id="campaignSendStatus" class="muted"></span>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -519,7 +388,6 @@
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
           <button id="draftEmailGenerateBtn" class="btn btn-primary">Generate</button>
           <button id="draftEmailCopyBtn" class="btn" style="display:none;">Copy to Clipboard</button>
-          <button id="draftEmailOpenBuilderBtn" class="btn btn-primary" style="display:none;"><i class="fas fa-pen-to-square"></i> Open in Email Builder</button>
         </div>
         <div id="draftEmailStatus" class="muted" style="margin-top:8px;"></div>
         <textarea id="draftEmailOutput" rows="14" style="display:none;width:100%;margin-top:8px;" placeholder="Your drafted email will appear here..."></textarea>
@@ -608,7 +476,6 @@
         <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
           <button id="createFlyerGenerateBtn" class="btn btn-primary">Generate</button>
           <a id="createFlyerDownloadBtn" class="btn" download="flyer.png" style="display:none;">Download Image</a>
-          <button id="createFlyerOpenBuilderBtn" class="btn btn-primary" style="display:none;"><i class="fas fa-pen-to-square"></i> Open in Flyer Builder</button>
         </div>
         <div id="createFlyerStatus" class="muted" style="margin-top:8px;"></div>
         <img id="createFlyerOutput" style="display:none;max-width:100%;margin-top:8px;border-radius:8px;" alt="Generated flyer/post" />
@@ -623,7 +490,6 @@
     window.IS_ADMIN       = {{ 'true' if current_user.is_admin else 'false' }}
     window.CAN_EXPORT     = {{ 'true' if (current_user.is_admin or current_user.can_export_contacts) else 'false' }}
     window.CAN_DRAFT      = {{ 'true' if (current_user.is_admin or current_user.can_draft_email) else 'false' }}
-    window.CAN_SEND_EMAIL = {{ 'true' if (current_user.is_admin or current_user.can_send_email) else 'false' }}
   </script>
 
   <!-- Lightweight fallback: shows search even if main app.js hasn't loaded yet -->
