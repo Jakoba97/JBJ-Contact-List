@@ -91,7 +91,6 @@ class Contact(db.Model):
     county = db.Column(db.String(128), nullable=True)
     notes = db.Column(db.Text, nullable=True)
     data_complete = db.Column(db.Boolean, default=False, nullable=False)
-    is_favorite = db.Column(db.Boolean, default=False, nullable=False, index=True)
     # Set when someone clicks the unsubscribe link in a sent email -- the
     # email builder's send route excludes these contacts, but the rest of
     # the app (exports, Draft Email, the main list) still shows them.
@@ -144,7 +143,6 @@ class Contact(db.Model):
             'county': self.county,
             'notes': self.notes,
             'data_complete': bool(self.data_complete),
-            'is_favorite': bool(self.is_favorite),
             'unsubscribed': bool(self.unsubscribed),
             'pipeline_stage': self.pipeline_stage,
             'deleted_at': self.deleted_at.isoformat() if self.deleted_at else None,
@@ -184,6 +182,22 @@ class Contact(db.Model):
         if self.email_secondary:                                    s += 5
         if self.industry:                                           s += 5
         return min(s, 100)
+
+
+class ContactFavorite(db.Model):
+    """Which user has starred which contact. A personal favorite, not a
+    property of the contact, so one person starring someone only shows up
+    on that person's own favorites list -- not everyone's."""
+    __tablename__ = 'contact_favorites'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    contact_id = db.Column(db.Integer, db.ForeignKey('contacts.id'), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'contact_id', name='uq_contact_favorite_user_contact'),
+    )
 
 
 # Community organization outreach tracking — Kadin Lee-Smith

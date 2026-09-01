@@ -20,7 +20,7 @@
   ═══════════════════════════════════════════════ -->
   <nav class="side-toolbar header-hidden" id="sideToolbar">
     <div class="toolbar-logo-wrap">
-      <div class="toolbar-logo-img" style="background:#fff;border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:0.75rem;color:var(--maroon);font-weight:700;letter-spacing:0.05em;">CRM</div>
+      <img class="toolbar-logo-img" src="/static/img/logo.Maroon.png" onerror="this.style.display='none'" alt="JBJ Management">
       <span class="toolbar-brand-text">Contact Hub</span>
     </div>
 
@@ -316,7 +316,7 @@
         <h2 id="addOrgTitle">Add Organization</h2>
         <form id="addOrgForm" class="modal-form">
           <label>Organization name<br><input id="addOrgName" type="text" placeholder="e.g. Dallas Regional Chamber" /></label>
-          <label>Category<br><input id="addOrgTag" type="text" list="addOrgTagOptions" placeholder="e.g. Dallas Civic" autocomplete="off" /></label>
+          <label>Industry<br><input id="addOrgTag" type="text" list="addOrgTagOptions" placeholder="e.g. Dallas Civic" autocomplete="off" /></label>
           <datalist id="addOrgTagOptions"></datalist>
           <label>Notes<br><textarea id="addOrgNotes" rows="3" placeholder="Anything worth noting about this organization"></textarea></label>
           <div id="addOrgStatus" class="flag flag-warn" style="display:none;margin-top:10px;"></div>

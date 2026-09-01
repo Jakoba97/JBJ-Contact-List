@@ -18,7 +18,7 @@ from flask_limiter import Limiter                # rate-limiting tool that block
 from flask_limiter.util import get_remote_address  # helper that identifies a visitor by their IP address so rate limiting knows who to track
 from config import Config       # imports your app's settings (database URL, secret key, etc.) from config.py
 from db import db               # your database connection - all contacts, users, emails, etc. are stored and retrieved through this
-from models import Contact, OutreachOrg, Activity, User, AuditLog, CaseStudy, Task, Group, LoginEvent  # imports every database table - each word is one type of record the app can store
+from models import Contact, OutreachOrg, Activity, User, AuditLog, CaseStudy, Task, Group, LoginEvent, ContactFavorite  # imports every database table - each word is one type of record the app can store
 from schemas import ContactSchema  # defines rules for formatting contact data when sending it to the browser as JSON
 from utils import (              # imports helper functions from utils.py for handling file uploads and data cleanup
     read_uploaded_file, clean_dataframe, clean_outreach_orgs,  # read an uploaded file, clean its data, and clean org import data
@@ -187,10 +187,24 @@ def filtered_contacts_query(q=None, tag=None, county=None, contact_id=None, grou
                     last_contacted.c.last_contacted < cutoff,          # include contacts not contacted since before the cutoff date
                 ))
     if favorites_only:                                         # if the Favorites filter is on...
-        query = query.filter(Contact.is_favorite == True)     # only return contacts the user has starred
+        favorited_ids = db.session.query(ContactFavorite.contact_id).filter(ContactFavorite.user_id == current_user.id)  # contacts the CURRENT user personally starred
+        query = query.filter(Contact.id.in_(favorited_ids))    # only return those -- other users' favorites don't show up here
     if incomplete_only:                                        # if the Incomplete filter is on...
         query = query.filter(contact_incomplete_clause())      # only return contacts with no email and no phone
     return query                                               # return the final filtered query (caller will call .all() or .count() on it)
+
+
+def favorited_contact_ids(contact_ids):
+    """Which of `contact_ids` the CURRENT user has personally starred --
+    favorites are per-user, so this never looks at other users' stars."""
+    if not contact_ids:
+        return set()
+    rows = (
+        db.session.query(ContactFavorite.contact_id)
+        .filter(ContactFavorite.user_id == current_user.id, ContactFavorite.contact_id.in_(contact_ids))
+        .all()
+    )
+    return {cid for (cid,) in rows}
 
 
 def log_audit(action, entity_type, entity_id=None, entity_label=None, details=None):
@@ -404,16 +418,16 @@ def _seed_demo_contacts():
     ]
 
     ORGS = [
-        ("City of Dallas","City Council","Municipal Government"),
-        ("Dallas County","County Official","County Government"),
+        ("City of Dallas","City Council","Local Government"),
+        ("Dallas County","County Official","Local Government"),
         ("Dallas ISD","Education Leader","Education"),
-        ("North Texas Council of Governments","Regional Official","Regional Government"),
+        ("North Texas Council of Governments","Regional Official","Local Government"),
         ("Dallas Area Rapid Transit","Transportation","Transportation"),
-        ("Greater Dallas Chamber","Business Leader","Business"),
-        ("Dallas Black Chamber of Commerce","Business Leader","Business"),
-        ("United Way of Metropolitan Dallas","Nonprofit Leader","Nonprofit"),
-        ("Communities Foundation of Texas","Nonprofit Leader","Nonprofit"),
-        ("North Texas Food Bank","Nonprofit Leader","Nonprofit"),
+        ("Greater Dallas Chamber","Business Leader","Business Services"),
+        ("Dallas Black Chamber of Commerce","Business Leader","Business Services"),
+        ("United Way of Metropolitan Dallas","Nonprofit Leader","Not For Profit"),
+        ("Communities Foundation of Texas","Nonprofit Leader","Not For Profit"),
+        ("North Texas Food Bank","Nonprofit Leader","Not For Profit"),
         ("Parkland Health","Healthcare","Healthcare"),
         ("UT Southwestern Medical Center","Healthcare","Healthcare"),
         ("Southern Methodist University","Education Leader","Education"),
@@ -421,9 +435,9 @@ def _seed_demo_contacts():
         ("Texas Department of Transportation","State Legislator","State Government"),
         ("Texas Education Agency","State Legislator","State Government"),
         ("Office of the Governor","State Legislator","State Government"),
-        ("Dallas Housing Authority","City Council","Municipal Government"),
-        ("DART Police","City Council","Municipal Government"),
-        ("Dallas Water Utilities","City Council","Municipal Government"),
+        ("Dallas Housing Authority","City Council","Local Government"),
+        ("DART Police","City Council","Local Government"),
+        ("Dallas Water Utilities","City Council","Local Government"),
     ]
 
     TITLES = [
@@ -501,7 +515,6 @@ def _seed_demo_contacts():
             active="Active" if rng.random() > 0.12 else "Inactive",
             added=rdate(500),
             data_complete=rng.random() > 0.18,
-            is_favorite=rng.random() > 0.82,
             pipeline_stage=stage,
             notes=rng.choice(NOTES_POOL) if rng.random() > 0.5 else None,
         )
@@ -509,6 +522,15 @@ def _seed_demo_contacts():
         contacts.append(c)
 
     db.session.flush()  # get IDs without committing
+
+    # Star ~18% of contacts as favorites for the first (bootstrap admin)
+    # user, so the demo shows a populated favorites list -- favorites are
+    # per-user, so this doesn't touch anyone else's account.
+    demo_user = User.query.order_by(User.id).first()
+    if demo_user:
+        for c in contacts:
+            if rng.random() > 0.82:
+                db.session.add(ContactFavorite(user_id=demo_user.id, contact_id=c.id))
 
     # Activity logs for ~35 contacts
     for c in rng.sample(contacts, min(35, len(contacts))):
@@ -772,12 +794,19 @@ def create_app(config_class=Config):
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_draft_email BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS can_export_contacts BOOLEAN NOT NULL DEFAULT FALSE",
+            # is_favorite moved to the per-user contact_favorites table -- drop
+            # the old NOT NULL column (and its index, which SQLite requires
+            # to be gone first) left over on any DB created before that
+            # change, or every contact creation fails (INSERT omits a column
+            # the schema still requires).
+            "DROP INDEX IF EXISTS ix_contacts_is_favorite",
+            "ALTER TABLE contacts DROP COLUMN is_favorite",
         ]:
             try:
                 db.session.execute(db.text(stmt))    # run each ALTER TABLE statement
                 db.session.commit()
             except Exception:
-                db.session.rollback()                # if the column already exists, this will fail safely - just roll back and continue
+                db.session.rollback()                # if the column already exists (or is already gone), this will fail safely - just roll back and continue
         _bootstrap_admin_user()                      # create the first admin account from .env if no users exist yet
         _seed_civic_orgs()                           # seed Dallas civic orgs into the outreach org table if not already there
         _seed_demo_contacts()                        # auto-seed fake contacts on first boot if DB is empty (portfolio demo)
@@ -1507,11 +1536,13 @@ def create_app(config_class=Config):
                     last_contacted[cid] = latest
                 if channel == 'Email' and latest and (cid not in last_emailed or latest > last_emailed[cid]):
                     last_emailed[cid] = latest
+            fav_ids = favorited_contact_ids(contact_ids)      # which of these THIS user has starred
             for c in contacts:
                 lc = last_contacted.get(c['id'])
                 le = last_emailed.get(c['id'])
                 c['last_contacted_on'] = lc.isoformat() if lc else None
                 c['last_emailed_on'] = le.isoformat() if le else None
+                c['is_favorite'] = c['id'] in fav_ids
 
         return jsonify({
             'page': page,
@@ -1523,7 +1554,9 @@ def create_app(config_class=Config):
     @app.route('/api/contacts/<int:contact_id>', methods=['GET'])
     def get_contact(contact_id):
         c = Contact.query.get_or_404(contact_id)
-        return jsonify(contact_schema.dump(c))
+        d = contact_schema.dump(c)
+        d['is_favorite'] = contact_id in favorited_contact_ids([contact_id])
+        return jsonify(d)
 
     @app.route('/api/contacts/<int:contact_id>', methods=['PUT'])
     def update_contact(contact_id):
@@ -1538,7 +1571,7 @@ def create_app(config_class=Config):
         changes = {}
         if 'email' in data and new_email != c.email:
             changes['email'] = {'old': c.email, 'new': new_email}
-        for field in ['first_name','last_name','organization','title','phone_office','phone_cell','active','county','notes','tag']:
+        for field in ['first_name','last_name','organization','title','phone_office','phone_cell','active','county','notes','tag','industry']:
             if field in data:
                 old = getattr(c, field)
                 new = data.get(field)
@@ -1601,13 +1634,20 @@ def create_app(config_class=Config):
     @app.route('/api/contacts/<int:contact_id>/favorite', methods=['PUT'])
     def toggle_contact_favorite(contact_id):
         # Deliberately not run through update_contact()'s change-diffing --
-        # starring something is a personal/team organizing action, not a
-        # data edit worth cluttering the Audit Log over.
-        c = Contact.query.get_or_404(contact_id)
+        # starring something is a personal organizing action, not a data
+        # edit worth cluttering the Audit Log over. Stored per-user (not on
+        # Contact) so starring a contact only shows up on your own
+        # favorites list, not everyone else's.
+        Contact.query.get_or_404(contact_id)
         data = request.get_json(silent=True) or {}
-        c.is_favorite = bool(data.get('is_favorite'))
+        want = bool(data.get('is_favorite'))
+        existing = ContactFavorite.query.filter_by(user_id=current_user.id, contact_id=contact_id).first()
+        if want and not existing:
+            db.session.add(ContactFavorite(user_id=current_user.id, contact_id=contact_id))
+        elif not want and existing:
+            db.session.delete(existing)
         db.session.commit()
-        return jsonify({'id': c.id, 'is_favorite': c.is_favorite})
+        return jsonify({'id': contact_id, 'is_favorite': want})
 
     @app.route('/api/contacts', methods=['POST'])
     def create_contact():
@@ -1640,6 +1680,7 @@ def create_app(config_class=Config):
             last_name=data.get('last_name') or None,
             organization=data.get('organization') or None,
             title=data.get('title') or None,
+            industry=data.get('industry') or None,
             phone_office=data.get('phone_office') or None,
             phone_cell=data.get('phone_cell') or None,
             active=data.get('active') or None,
@@ -1996,6 +2037,8 @@ def create_app(config_class=Config):
 
     @app.route('/api/groups/<int:group_id>', methods=['DELETE'])
     def delete_group(group_id):
+        if not current_user.is_admin:
+            return jsonify({'error': 'admin only'}), 403
         g = Group.query.get_or_404(group_id)
         label = g.name
         db.session.delete(g)

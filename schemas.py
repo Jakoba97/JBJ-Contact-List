@@ -15,6 +15,6 @@ class ContactSchema(Schema):
     active = fields.Str(allow_none=True)
     lists = fields.List(fields.Str())
     county = fields.Str(allow_none=True)
+    industry = fields.Str(allow_none=True)
     notes = fields.Str(allow_none=True)
     data_complete = fields.Bool()
-    is_favorite = fields.Bool()

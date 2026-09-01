@@ -16,6 +16,18 @@ const API = {
 
 let state = { page: 1, limit: 25, q: '', tags: [], counties: [], organizations: [], followup: '', favoritesOnly: false, total: 0, view: 'people', selectedKey: null, showDeleted: false }
 
+// Approved industry list for the Add/Edit Contact form's Industry dropdown.
+const INDUSTRY_OPTIONS = [
+  'Activist','Advertising','Aerospace & Defense','Agriculture','Apparel','Architecture',
+  'Banking','Biotechnology','Business Services','Chemicals','Communications','Construction',
+  'Consulting','Design','Education','Electronics','Energy','Engineering','Entertainment',
+  'Environmental','Federal Government','Finance','Food & Beverage','Government','Healthcare',
+  'Hospitality','Insurance','Labor','Local Government','Machinery','Manufacturing','Media',
+  'News','Not For Profit','Other','Public Engagement','Real Estate','Recreation','Religion',
+  'Retail','Shipping','State Government','Technology','Telecommunications','Transportation',
+  'Utilities',
+]
+
 // Tracks which row is currently highlighted (Gmail-style) as its detail
 // modal is open -- purely visual, the modal itself is closed with its own X.
 function selectCard(key, cardEl, openFn){
@@ -322,8 +334,9 @@ function renderContactTableRow(c){
     </td>
     <td><a href="#" class="contact-name-link">${c.first_name||''} ${c.last_name||''}</a></td>
     <td>${c.organization || '<span class="muted">-</span>'}</td>
+    <td>${c.industry || '<span class="muted">-</span>'}</td>
     <td>${c.title || '<span class="muted">-</span>'}</td>
-    <td>${phone || '<span class="muted">-</span>'}</td>
+    <td class="col-phone">${phone || '<span class="muted">-</span>'}</td>
     <td>${c.email ? `<a href="mailto:${c.email}">${c.email}</a>` : '<span class="muted">-</span>'}</td>
     ${state.showDeleted ? `<td class="col-actions">
       <button class="btn btn-sm restore-btn"><i class="fas fa-rotate-left"></i> Restore</button>
@@ -383,10 +396,6 @@ function renderOrgCard(item){
   const key = 'org:'+item.organization
   div.className = 'card' + (state.selectedKey === key ? ' selected' : '')
   div.tabIndex = 0
-  const contacts = item.contacts || []
-  const contactsHtml = contacts.length
-    ? `<div class="org-contacts">${contacts.map(c=>`<div class="org-contact-row" data-id="${c.id}"><span class="pc-name">${c.name||'(no name)'}</span><span class="pc-meta">${c.title? ' - '+c.title : ''}</span></div>`).join('')}</div>`
-    : '<div class="muted">No contact on file</div>'
   div.innerHTML = `
     <div class="card-top">
       <div class="avatar md">${(item.organization||'?').charAt(0).toUpperCase()}</div>
@@ -395,7 +404,6 @@ function renderOrgCard(item){
         <div class="meta">${item.contact_count||0} contact${item.contact_count===1?'':'s'}${item.latest_updated? ' • Updated '+new Date(item.latest_updated+'T00:00:00').toLocaleDateString() : ''}</div>
       </div>
     </div>
-    ${contactsHtml}
     ${item.notes ? `<div class="category">${item.notes.replace(/\|\|/g,', ')}</div>` : ''}
     <div class="card-actions" style="margin-top:8px;display:flex;gap:8px;">
       <button class="btn btn-sm view-btn"><i class="fas fa-eye"></i> View</button>
@@ -404,8 +412,6 @@ function renderOrgCard(item){
     </div>
   `
   div.addEventListener('click', (ev)=>{
-    const row = ev.target.closest('.org-contact-row')
-    if(row){ ev.stopPropagation(); selectCard('contact:'+row.dataset.id, null, ()=> showContactDetail(parseInt(row.dataset.id,10))); return }
     if(ev.target && ev.target.closest('.add-btn')) return
     selectCard(key, div, ()=> showOrgDetail(item))
   })
@@ -445,8 +451,6 @@ async function showContactDetail(contact){
     }
     const panel = el('modalBody')
     if(!panel) return
-    const incomplete = ((!c.email || c.email.trim()==='') && (!c.phone_office && !c.phone_cell))
-    const hasNotes = c.notes && c.notes.trim().length>0
     panel.innerHTML = `
       <div class="detail-card">
         <div class="detail-photo photo-placeholder">${(c.first_name||c.last_name)? (c.first_name||'').charAt(0) + (c.last_name||'').charAt(0) : '-'}</div>
@@ -473,34 +477,21 @@ async function showContactDetail(contact){
               : ''
             return `<div class="detail-row"><strong>Email Lists:</strong><ul style="${ulStyle}">${visibleHtml}</ul>${hiddenBlock}</div>`
           })()}
-          <div class="detail-notes">${hasNotes? `<h4>Notes</h4><div class="notes">${(c.notes||'').replace(/\n/g,'<br>')}</div>` : ''}</div>
           <div class="detail-flags" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-            ${incomplete? '<span class="flag flag-warn">Incomplete</span>' : '<span class="flag flag-ok">Complete</span>'}
-            ${hasNotes? '<span class="flag flag-info">Has notes</span>' : ''}
             <button id="detailEditBtn" class="btn"><i class="fas fa-pen"></i> Edit</button>
             ${window.CAN_EXPORT ? `<a id="detailExport" class="btn" href="/api/export?id=${encodeURIComponent(c.id||'')}"><i class="fas fa-download"></i> Export</a>` : ''}
             ${window.IS_ADMIN ? '<button id="detailDeleteBtn" class="btn" style="color:#9b1c1c;"><i class="fas fa-trash"></i> Delete</button>' : ''}
           </div>
-          ${pipelineStageSectionHtml(c.pipeline_stage || '')}
-          ${taskSectionHtml()}
           ${activitySectionHtml()}
         </div>
       </div>
     `
     const modal = el('profileModal')
-    if(modal) modal.style.display = ''
+    if(modal){ modal.style.display = ''; modal.classList.remove('group-modal') }
     panel.scrollTop = 0
     const edit = el('detailEditBtn'); if(edit) edit.addEventListener('click', ()=> openProfile(c.id))
     const favBtn = el('detailFavoriteBtn'); if(favBtn) favBtn.addEventListener('click', ()=> toggleFavorite(c, favBtn))
     const deleteBtn = el('detailDeleteBtn'); if(deleteBtn) deleteBtn.addEventListener('click', ()=> deleteContact(c))
-    const stageSelect = el('pipelineStageSelect')
-    if(stageSelect) stageSelect.addEventListener('change', async ()=>{
-      await movePipelineContact(c.id, stageSelect.value)
-      toast(stageSelect.value ? `Moved to ${stageSelect.value}` : 'Removed from pipeline')
-    })
-    const taskContainer = panel.querySelector('.task-section-inline')
-    loadContactTaskSection(taskContainer, c.id)
-    bindContactTaskForm(taskContainer, c.id)
     const activityContainer = panel.querySelector('.activity-section')
     loadActivitySection(activityContainer, 'contact', c.id)
     bindActivityForm(activityContainer, 'contact', c.id)
@@ -547,7 +538,7 @@ function showOrgDetail(item){
     </div>
   `
   const modal = el('profileModal')
-  if(modal) modal.style.display = ''
+  if(modal){ modal.style.display = ''; modal.classList.remove('group-modal') }
   const addBtn = el('detailAddContactBtn')
   if(addBtn) addBtn.addEventListener('click', ()=> openProfile(null, {organization: item.organization, tag: item.tag||''}))
   panel.querySelectorAll('.view-person-btn').forEach(b=> b.addEventListener('click', ()=> showContactDetail(parseInt(b.dataset.id,10))))
@@ -594,7 +585,7 @@ async function showGroupDetail(groupId){
           <div class="detail-notes">${g.description ? `<div class="notes">${g.description.replace(/\n/g,'<br>')}</div>` : '<span class="muted">No description</span>'}</div>
           <div class="detail-flags" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <button id="groupEditBtn" class="btn"><i class="fas fa-pen"></i> Edit</button>
-            <button id="groupDeleteBtn" class="btn" style="color:#9b1c1c;"><i class="fas fa-trash"></i> Delete Group</button>
+            ${window.IS_ADMIN ? '<button id="groupDeleteBtn" class="btn" style="color:#9b1c1c;"><i class="fas fa-trash"></i> Delete Group</button>' : ''}
             ${window.CAN_EXPORT ? `
             <div class="export-wrap">
               <button id="groupExportMenuBtn" class="btn"><i class="fas fa-download"></i> Export <i class="fas fa-chevron-down" style="font-size:11px;"></i></button>
@@ -615,10 +606,10 @@ async function showGroupDetail(groupId){
       </div>
     `
     const modal = el('profileModal')
-    if(modal) modal.style.display = ''
+    if(modal){ modal.style.display = ''; modal.classList.add('group-modal') }
     panel.scrollTop = 0
     el('groupEditBtn').addEventListener('click', ()=> openGroupForm(g.id))
-    el('groupDeleteBtn').addEventListener('click', ()=> deleteGroup(g))
+    if(el('groupDeleteBtn')) el('groupDeleteBtn').addEventListener('click', ()=> deleteGroup(g))
     panel.querySelectorAll('.view-person-btn').forEach(b=> b.addEventListener('click', ()=> showContactDetail(parseInt(b.dataset.id,10))))
     panel.querySelectorAll('.remove-member-btn').forEach(b=> b.addEventListener('click', async ()=>{
       await fetch(`/api/groups/${g.id}/contacts/${b.dataset.id}`, {method:'DELETE'})
@@ -742,7 +733,7 @@ async function openGroupForm(id){
     </form>
   `
   const modal = el('profileModal')
-  if(modal) modal.style.display = ''
+  if(modal){ modal.style.display = ''; modal.classList.remove('group-modal') }
   el('closeGroupModalBtn').addEventListener('click', closeModal)
   el('saveGroupBtn').addEventListener('click', async ()=>{
     const name = el('gf_name').value.trim()
@@ -773,7 +764,7 @@ function activitySectionHtml(){
   const today = new Date().toISOString().slice(0,10)
   return `
     <div class="activity-section">
-      <h4>Outreach History</h4>
+      <h4>History</h4>
       <div class="activity-badge"></div>
       <div class="activity-list">Loading…</div>
       <div class="activity-form">
@@ -785,7 +776,7 @@ function activitySectionHtml(){
         </select>
         <input type="date" class="activity-date" value="${today}">
         <textarea class="activity-summary" rows="2" placeholder="What was discussed / details"></textarea>
-        <button class="btn btn-primary activity-log-btn"><i class="fas fa-phone"></i> Log Outreach</button>
+        <button class="btn btn-primary activity-log-btn"><i class="fas fa-phone"></i> Log History</button>
       </div>
     </div>
   `
@@ -1059,72 +1050,6 @@ function bindTasksPanel(){
   }
 }
 
-// Contact-level task section (embedded in the contact detail panel)
-
-function taskSectionHtml(){
-  return `
-    <div class="task-section-inline">
-      <h4><i class="fas fa-list-check"></i> Tasks</h4>
-      <div class="task-list-inline">Loading…</div>
-      <div class="task-inline-form">
-        <input type="text" class="task-inline-input" placeholder="Add a task…" />
-        <input type="date" class="task-inline-date" />
-        <button class="btn btn-sm btn-primary task-inline-add"><i class="fas fa-plus"></i> Add</button>
-      </div>
-      <textarea class="task-inline-notes" rows="2" placeholder="Notes (optional)" style="display:none;"></textarea>
-    </div>`
-}
-
-async function loadContactTaskSection(container, contactId){
-  const listEl = container.querySelector('.task-list-inline')
-  if(!listEl) return
-  try{
-    const res = await fetch(`/api/contacts/${contactId}/tasks`)
-    const json = await res.json()
-    const tasks = json.tasks || []
-    if(!tasks.length){
-      listEl.innerHTML = '<div class="muted" style="font-size:13px;margin-bottom:6px;">No tasks yet.</div>'
-    } else {
-      listEl.innerHTML = tasks.map(t => taskItemHtml(t, false)).join('')
-      bindTaskItems(listEl, ()=>{ loadContactTaskSection(container, contactId); loadTaskBadge() })
-    }
-  }catch(e){ listEl.innerHTML = '<div class="muted">Could not load tasks.</div>' }
-}
-
-function bindContactTaskForm(container, contactId){
-  const addBtn = container.querySelector('.task-inline-add')
-  const titleInput = container.querySelector('.task-inline-input')
-  const notesEl = container.querySelector('.task-inline-notes')
-  if(!addBtn) return
-
-  // Show notes textarea when the title has something typed
-  if(titleInput && notesEl){
-    titleInput.addEventListener('input', ()=>{
-      notesEl.style.display = titleInput.value.trim() ? '' : 'none'
-    })
-  }
-
-  addBtn.addEventListener('click', async ()=>{
-    const dateInput = container.querySelector('.task-inline-date')
-    const title = (titleInput.value || '').trim()
-    if(!title){ toast('Enter a task title.', 'error'); return }
-    const due_date = dateInput.value || null
-    const notes = (notesEl ? notesEl.value : '').trim() || null
-    const res = await fetch('/api/tasks', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({title, due_date, notes, contact_id: contactId})
-    })
-    if(!res.ok){ toast('Could not save task.', 'error'); return }
-    titleInput.value = ''
-    dateInput.value = ''
-    if(notesEl){ notesEl.value = ''; notesEl.style.display = 'none' }
-    loadContactTaskSection(container, contactId)
-    loadTaskBadge()
-    toast('Task added')
-  })
-}
-
 // searchSeq guards against races between overlapping calls (e.g. a slower
 // earlier fetch resolving after a faster, later one and overwriting it).
 let searchSeq = 0
@@ -1178,8 +1103,9 @@ async function search(){
             <th class="col-star"></th>
             <th>Name</th>
             <th>Organization</th>
+            <th>Industry</th>
             <th>Title</th>
-            <th>Phone</th>
+            <th class="col-phone">Phone</th>
             <th>Email</th>
             ${state.showDeleted ? '<th>Actions</th>' : ''}
           </tr>
@@ -1212,7 +1138,7 @@ function renderPagination(total){
 
 async function openProfile(id, defaults={}){
   try{
-    let c = {id:null, first_name:'', last_name:'', organization:'', title:'', email:'', phone_office:'', phone_cell:'', county:'', lists:[], notes:'', tag:'', ...defaults}
+    let c = {id:null, first_name:'', last_name:'', organization:'', title:'', email:'', phone_office:'', phone_cell:'', county:'', industry:'', lists:[], tag:'', ...defaults}
     if(id){
       const res = await fetch(`/api/contacts/${id}`)
       c = await res.json()
@@ -1226,13 +1152,13 @@ async function openProfile(id, defaults={}){
         <label>Last name<br><input id="cf_last" value="${c.last_name||''}" /></label>
         <label>Organization<br><input id="cf_org" value="${c.organization||''}" /></label>
         <label>Title<br><input id="cf_title" value="${c.title||''}" /></label>
+        <label>Industry<br><select id="cf_industry"><option value="">- Select -</option>${INDUSTRY_OPTIONS.map(i=>`<option value="${i}" ${c.industry===i?'selected':''}>${i}</option>`).join('')}</select></label>
         <label>Email<br><input id="cf_email" value="${c.email||''}" /></label>
         <label>Office Phone<br><input id="cf_office" value="${c.phone_office||''}" /></label>
         <label>Cell Phone<br><input id="cf_cell" value="${c.phone_cell||''}" /></label>
         <label>Tag<br><input id="cf_tag" value="${c.tag||''}" /></label>
         <label>Lists (comma separated)<br><input id="cf_lists" value="${(c.lists||[]).join(', ')}" /></label>
         <label>County<br><input id="cf_county" value="${c.county||''}" /></label>
-        <label>Notes<br><textarea id="cf_notes">${c.notes||''}</textarea></label>
         <div id="duplicateWarning" class="flag flag-warn" style="display:none;margin-top:10px;"></div>
         <div style="margin-top:10px">
           <button id="saveContactBtn" type="button" class="btn btn-primary"><i class="fas fa-check"></i> Save</button>
@@ -1242,7 +1168,7 @@ async function openProfile(id, defaults={}){
       </form>
     `
     const modal = el('profileModal')
-    if(modal){ modal.style.display = '' }
+    if(modal){ modal.style.display = ''; modal.classList.remove('group-modal') }
     el('closeModalBtn').addEventListener('click', closeModal)
     el('saveContactBtn').addEventListener('click', ()=> saveContact(false))
     el('addAnywayBtn').addEventListener('click', ()=> saveContact(true))
@@ -1256,13 +1182,13 @@ async function saveContact(force){
     last_name: el('cf_last').value.trim(),
     organization: el('cf_org').value.trim(),
     title: el('cf_title').value.trim(),
+    industry: el('cf_industry').value.trim(),
     email: el('cf_email').value.trim(),
     phone_office: el('cf_office').value.trim(),
     phone_cell: el('cf_cell').value.trim(),
     tag: el('cf_tag').value.trim(),
     lists: (el('cf_lists').value||'').split(',').map(s=>s.trim()).filter(Boolean),
     county: el('cf_county').value.trim(),
-    notes: el('cf_notes').value.trim(),
   }
   if(!id && force) payload.force_create = true
   try{
@@ -1739,16 +1665,6 @@ async function loadPipelineData(){
     tab.textContent = `${label} (${count})`
   })
   renderPipelineList()
-}
-
-function pipelineStageSectionHtml(currentStage){
-  const opts = ['', ...PIPELINE_STAGES].map(s =>
-    `<option value="${s}" ${s===currentStage?'selected':''}>${s||'- Not in pipeline -'}</option>`
-  ).join('')
-  return `<div class="detail-section pipeline-stage-section">
-    <h4 class="detail-section-title"><i class="fas fa-kanban"></i> Pipeline Stage</h4>
-    <select id="pipelineStageSelect" class="pipeline-stage-select">${opts}</select>
-  </div>`
 }
 
 let _pipelineSearchTimer = null
