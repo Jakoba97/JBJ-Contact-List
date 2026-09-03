@@ -12,9 +12,16 @@ const API = {
   counties: '/api/counties',
   contactOrganizations: '/api/contact-organizations',
   groups: '/api/groups',
+  archivedGroups: '/api/archived-groups',
 }
 
-let state = { page: 1, limit: 25, q: '', tags: [], counties: [], organizations: [], followup: '', favoritesOnly: false, total: 0, view: 'people', selectedKey: null, showDeleted: false }
+let state = { page: 1, limit: 25, q: '', tags: [], counties: [], organizations: [], industries: [], followup: '', favoritesOnly: false, total: 0, view: 'people', selectedKey: null, showDeleted: false }
+
+// Contacts checked via the group-select button in the People table, for
+// the "select several, add them all to a group" bulk action. Persists
+// across pagination/search so a multi-page selection survives -- cleared
+// only by the Clear button or a successful add-to-group.
+let selectedForGroup = new Set()
 
 // Approved industry list for the Add/Edit Contact form's Industry dropdown.
 const INDUSTRY_OPTIONS = [
@@ -241,8 +248,39 @@ async function fetchContactOrganizations(){
   }catch(e){console.warn(e)}
 }
 
+function updateIndustryFilterLabel(){
+  const label = el('industryFilterLabel')
+  if(!label) return
+  label.textContent = state.industries.length ? `(${state.industries.length} selected)` : ''
+}
+
+// Industry filter only applies to the People view, same reasoning as
+// Organizations above. Sourced from the fixed approved industry list
+// (INDUSTRY_OPTIONS) rather than fetched, since it doesn't change per-org.
+function populateIndustryFilterMenu(){
+  const menu = el('industryFilterMenu')
+  if(!menu) return
+  menu.innerHTML = INDUSTRY_OPTIONS.map(name => `
+    <label class="filter-option">
+      <input type="checkbox" value="${name}" ${state.industries.includes(name) ? 'checked' : ''}>
+      <span>${name}</span>
+    </label>
+  `).join('')
+  menu.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', ()=>{
+      if(cb.checked){
+        if(!state.industries.includes(cb.value)) state.industries.push(cb.value)
+      } else {
+        state.industries = state.industries.filter(i => i !== cb.value)
+      }
+      updateIndustryFilterLabel()
+    })
+  })
+  updateIndustryFilterLabel()
+}
+
 function activeFilterCount(){
-  return state.tags.length + state.counties.length + state.organizations.length
+  return state.tags.length + state.counties.length + state.organizations.length + state.industries.length
     + (state.followup ? 1 : 0) + (state.favoritesOnly ? 1 : 0)
 }
 
@@ -277,10 +315,10 @@ function bindFilterMenu(){
 
   const clearBtn = el('clearFiltersBtn')
   if(clearBtn) clearBtn.addEventListener('click', ()=>{
-    state.tags = []; state.counties = []; state.organizations = []; state.followup = ''; state.favoritesOnly = false
+    state.tags = []; state.counties = []; state.organizations = []; state.industries = []; state.followup = ''; state.favoritesOnly = false
     const favCb = el('favoritesOnlyCheckbox'); if(favCb) favCb.checked = false
     const allRadio = document.querySelector('input[name=followupRadio][value=""]'); if(allRadio) allRadio.checked = true
-    fetchTagOptions(); fetchCounties(); fetchContactOrganizations()
+    fetchTagOptions(); fetchCounties(); fetchContactOrganizations(); populateIndustryFilterMenu()
     updateFilterCountBadge()
     state.page = 1
     search()
@@ -331,6 +369,9 @@ function renderContactTableRow(c){
       <button class="favorite-btn${c.is_favorite? ' is-favorite':''}" title="${c.is_favorite? 'Unstar' : 'Star this contact'}" aria-pressed="${c.is_favorite? 'true':'false'}">
         <i class="${c.is_favorite? 'fas':'far'} fa-star"></i>
       </button>
+      <button class="group-select-btn${selectedForGroup.has(c.id)? ' is-selected':''}" title="${selectedForGroup.has(c.id)? 'Remove from selection' : 'Select for group'}" aria-pressed="${selectedForGroup.has(c.id)? 'true':'false'}">
+        <i class="fas fa-layer-group"></i>
+      </button>
     </td>
     <td><a href="#" class="contact-name-link">${c.first_name||''} ${c.last_name||''}</a></td>
     <td>${c.organization || '<span class="muted">-</span>'}</td>
@@ -345,16 +386,108 @@ function renderContactTableRow(c){
   `
   tr.addEventListener('click', (ev)=>{
     if(ev.target && ev.target.closest('.contact-name-link')) ev.preventDefault()
-    if(ev.target && ev.target.closest('.favorite-btn, .restore-btn, .purge-btn')) return
+    if(ev.target && ev.target.closest('.favorite-btn, .group-select-btn, .restore-btn, .purge-btn')) return
     if(!state.showDeleted) selectCard(key, tr, ()=> showContactDetail(c))
   })
   const favoriteBtn = tr.querySelector('.favorite-btn')
   if(favoriteBtn) favoriteBtn.addEventListener('click', (e)=>{ e.stopPropagation(); toggleFavorite(c, favoriteBtn) })
+  const groupSelectBtn = tr.querySelector('.group-select-btn')
+  if(groupSelectBtn) groupSelectBtn.addEventListener('click', (e)=>{
+    e.stopPropagation()
+    if(selectedForGroup.has(c.id)){
+      selectedForGroup.delete(c.id)
+      groupSelectBtn.classList.remove('is-selected')
+      groupSelectBtn.title = 'Select for group'
+      groupSelectBtn.setAttribute('aria-pressed', 'false')
+    } else {
+      selectedForGroup.add(c.id)
+      groupSelectBtn.classList.add('is-selected')
+      groupSelectBtn.title = 'Remove from selection'
+      groupSelectBtn.setAttribute('aria-pressed', 'true')
+    }
+    updateGroupSelectBar()
+  })
   const restoreBtn = tr.querySelector('.restore-btn')
   if(restoreBtn) restoreBtn.addEventListener('click', (e)=>{ e.stopPropagation(); restoreContact(c.id, tr) })
   const purgeBtn = tr.querySelector('.purge-btn')
   if(purgeBtn) purgeBtn.addEventListener('click', (e)=>{ e.stopPropagation(); purgeContact(c.id, tr) })
   return tr
+}
+
+function updateGroupSelectBar(){
+  const bar = el('groupSelectBar')
+  const countEl = el('groupSelectCount')
+  if(!bar || !countEl) return
+  const n = selectedForGroup.size
+  bar.style.display = n ? '' : 'none'
+  countEl.textContent = `${n} contact${n===1?'':'s'} selected`
+}
+
+function bindGroupSelectBar(){
+  const clearBtn = el('clearGroupSelectBtn')
+  if(clearBtn) clearBtn.addEventListener('click', ()=>{
+    selectedForGroup.clear()
+    updateGroupSelectBar()
+    document.querySelectorAll('.group-select-btn.is-selected').forEach(btn=>{
+      btn.classList.remove('is-selected')
+      btn.title = 'Select for group'
+      btn.setAttribute('aria-pressed', 'false')
+    })
+  })
+
+  const addBtn = el('addToGroupBtn')
+  const menu = el('addToGroupMenu')
+  if(!addBtn || !menu) return
+  addBtn.addEventListener('click', async (e)=>{
+    e.stopPropagation()
+    const opening = menu.style.display === 'none'
+    closeOtherFilterMenus('')
+    menu.style.display = 'none'
+    if(!opening) return
+    await populateAddToGroupMenu(menu)
+    menu.style.display = ''
+  })
+  menu.addEventListener('click', (e)=> e.stopPropagation())
+  document.addEventListener('click', ()=>{ menu.style.display = 'none' })
+}
+
+async function populateAddToGroupMenu(menu){
+  menu.innerHTML = '<div class="filter-menu-empty">Loading…</div>'
+  try{
+    const res = await fetch(`${API.groups}?limit=200`)
+    const j = await res.json()
+    const groups = j.groups || []
+    const groupItems = groups.map(g => `<button type="button" class="export-menu-item add-to-group-item" data-id="${g.id}"><i class="fas fa-layer-group"></i> ${g.name}</button>`).join('')
+    menu.innerHTML = `
+      ${groups.length ? groupItems : '<div class="filter-menu-empty">No groups yet.</div>'}
+      <button type="button" class="export-menu-item" id="addToGroupNewBtn"><i class="fas fa-plus"></i> New Group…</button>
+    `
+    menu.querySelectorAll('.add-to-group-item').forEach(btn=>{
+      btn.addEventListener('click', ()=> addSelectedContactsToGroup(parseInt(btn.dataset.id, 10)))
+    })
+    const newBtn = el('addToGroupNewBtn')
+    if(newBtn) newBtn.addEventListener('click', ()=>{
+      menu.style.display = 'none'
+      openGroupForm(null, Array.from(selectedForGroup))
+    })
+  }catch(e){ menu.innerHTML = '<div class="filter-menu-empty">Could not load groups.</div>' }
+}
+
+async function addSelectedContactsToGroup(groupId){
+  const ids = Array.from(selectedForGroup)
+  if(!ids.length) return
+  const menu = el('addToGroupMenu')
+  if(menu) menu.style.display = 'none'
+  try{
+    const res = await fetch(`/api/groups/${groupId}/contacts`, {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({contact_ids: ids})
+    })
+    if(!res.ok){ toast('Could not add contacts to group.', 'error'); return }
+    toast(`Added ${ids.length} contact${ids.length===1?'':'s'} to group`)
+    selectedForGroup.clear()
+    updateGroupSelectBar()
+    search()
+  }catch(e){ toast('Could not add contacts to group.', 'error'); console.error(e) }
 }
 
 async function toggleFavorite(c, btnEl){
@@ -621,6 +754,86 @@ async function showGroupDetail(groupId){
   }catch(e){ console.error(e); toast('Could not load group.', 'error') }
 }
 
+// Archived Constant Contact groups -- read-only, sourced from the
+// "Archived Constant Contact" import column rather than a real Group row.
+function renderArchivedGroupCard(g){
+  const div = document.createElement('div')
+  div.className = 'card'
+  div.tabIndex = 0
+  div.innerHTML = `
+    <div class="card-top">
+      <div class="avatar md"><i class="fas fa-box-archive"></i></div>
+      <div>
+        <h3>${g.name||''}</h3>
+        <div class="meta">${g.contact_count||0} contact${g.contact_count===1?'':'s'}</div>
+      </div>
+    </div>
+    <div class="card-actions" style="margin-top:8px;display:flex;gap:8px;">
+      <button class="btn btn-sm view-btn"><i class="fas fa-eye"></i> View</button>
+    </div>
+  `
+  div.addEventListener('click', ()=> showArchivedGroupDetail(g.name))
+  return div
+}
+
+async function fetchArchivedGroups(){
+  const grid = el('archivedGroupsGrid')
+  if(!grid) return
+  grid.innerHTML = '<div class="muted">Loading…</div>'
+  try{
+    const res = await fetch(API.archivedGroups)
+    const groups = await res.json()
+    if(!groups.length){
+      grid.innerHTML = '<div class="muted">No archived Constant Contact groups on file yet.</div>'
+      return
+    }
+    grid.innerHTML = ''
+    groups.forEach(g => grid.appendChild(renderArchivedGroupCard(g)))
+  }catch(e){ grid.innerHTML = '<div class="muted">Could not load archived groups.</div>' }
+}
+
+async function showArchivedGroupDetail(name){
+  try{
+    const res = await fetch(`/api/archived-groups/${encodeURIComponent(name)}`)
+    if(!res.ok){ toast('Could not load group.', 'error'); return }
+    const g = await res.json()
+    const panel = el('modalBody')
+    if(!panel) return
+    const members = g.contacts || []
+    const membersHtml = members.length
+      ? `<div class="org-contact-list">${members.map(c=>`
+          <div class="org-contact-item">
+            <div class="org-contact-info">
+              <div class="avatar sm">${initials(c.first_name, c.last_name)}</div>
+              <div class="org-contact-text">
+                <div class="pc-name">${(c.first_name||'')+' '+(c.last_name||'')}</div>
+                <div class="pc-meta">${c.title||''}${c.organization? ' • '+c.organization : ''}</div>
+              </div>
+            </div>
+            <div class="org-contact-actions">
+              <button class="btn btn-sm view-person-btn" data-id="${c.id}"><i class="fas fa-eye"></i> View</button>
+            </div>
+          </div>
+        `).join('')}</div>`
+      : '<div class="muted">No contacts on file for this group.</div>'
+    panel.innerHTML = `
+      <div class="detail-card">
+        <div class="detail-photo photo-placeholder"><i class="fas fa-box-archive"></i></div>
+        <div class="detail-main">
+          <h2>${g.name||''}</h2>
+          <div class="detail-sub">${g.contact_count||0} contact${g.contact_count===1?'':'s'} • Archived Constant Contact</div>
+          <h4 class="detail-section-title" style="margin-top:14px;"><i class="fas fa-users"></i> Members</h4>
+          ${membersHtml}
+        </div>
+      </div>
+    `
+    const modal = el('profileModal')
+    if(modal){ modal.style.display = ''; modal.classList.remove('group-modal') }
+    panel.scrollTop = 0
+    panel.querySelectorAll('.view-person-btn').forEach(b=> b.addEventListener('click', ()=> showContactDetail(parseInt(b.dataset.id,10))))
+  }catch(e){ console.error(e) }
+}
+
 function bindGroupExportMenu(groupId){
   const btn = el('groupExportMenuBtn')
   const menu = el('groupExportMenu')
@@ -713,7 +926,7 @@ async function deleteGroup(g){
   }catch(e){ toast('Could not reach the server.', 'error'); console.error(e) }
 }
 
-async function openGroupForm(id){
+async function openGroupForm(id, pendingContactIds){
   let g = {id: null, name: '', description: ''}
   if(id){
     const res = await fetch(`/api/groups/${id}`)
@@ -749,6 +962,13 @@ async function openGroupForm(id){
       })
       const j = await res.json()
       if(!res.ok){ errEl.textContent = j.error || 'Could not save group.'; errEl.style.display = ''; return }
+      if(!id && pendingContactIds && pendingContactIds.length){
+        await fetch(`/api/groups/${j.id}/contacts`, {
+          method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({contact_ids: pendingContactIds})
+        })
+        selectedForGroup.clear()
+        updateGroupSelectBar()
+      }
       state.page = 1
       search()
       showGroupDetail(j.id)
@@ -1063,6 +1283,7 @@ async function search(){
   if(state.tags.length) params.set('tag', state.tags.join(','))
   if(state.counties.length) params.set('county', state.counties.join(','))
   if(state.view !== 'organizations' && state.organizations.length) params.set('organization', state.organizations.join(','))
+  if(state.view !== 'organizations' && state.industries.length) params.set('industry', state.industries.join(','))
   if(state.view !== 'organizations' && state.followup) params.set('followup', state.followup)
   if(state.view !== 'organizations' && state.favoritesOnly) params.set('favorites_only', '1')
   if(state.showDeleted) params.set('show_deleted', '1')
@@ -1261,6 +1482,8 @@ function switchView(view, userInitiated){
   if(favoritesOnlyCheckbox) favoritesOnlyCheckbox.disabled = (view === 'organizations')
   const orgFilterSection = el('orgFilterSection')
   if(orgFilterSection) orgFilterSection.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.disabled = (view === 'organizations') })
+  const industryFilterSection = el('industryFilterSection')
+  if(industryFilterSection) industryFilterSection.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.disabled = (view === 'organizations') })
   // Filters/Export/Trash don't apply to Groups (it's not a filtered contact
   // list) -- New Group only makes sense there.
   const filterWrap = el('filterMenuWrap'); const exportWrap = el('exportMenuWrap'); const newGroupBtn = el('newGroupBtn')
@@ -1277,6 +1500,9 @@ function switchView(view, userInitiated){
     history.pushState({page: hash.slice(1)}, '', hash)
   }
   if(view !== 'groups') fetchTagOptions()
+  const archivedSection = el('archivedGroupsSection')
+  if(archivedSection) archivedSection.style.display = (view === 'groups') ? '' : 'none'
+  if(view === 'groups') fetchArchivedGroups()
   search()
 }
 
@@ -1336,6 +1562,7 @@ function bind(){
   bindAdminMenu()
   bindTasksPanel()
   bindAddOrg()
+  bindGroupSelectBar()
 }
 
 function bindAddOrg(){
@@ -1344,20 +1571,12 @@ function bindAddOrg(){
   if(!btn || !modal) return
 
   let tagsLoaded = false
-  const loadTagOptions = async ()=>{
+  const loadTagOptions = ()=>{
     if(tagsLoaded) return
     const list = el('addOrgTagOptions')
     if(!list) return
-    try{
-      const res = await fetch(API.sectionCategories)
-      const tags = await res.json()
-      ;(tags || []).forEach(tag=>{
-        const opt = document.createElement('option')
-        opt.value = tag
-        list.appendChild(opt)
-      })
-      tagsLoaded = true
-    }catch(e){ console.error(e) }
+    list.innerHTML = INDUSTRY_OPTIONS.map(name => `<option value="${name}"></option>`).join('')
+    tagsLoaded = true
   }
 
   btn.addEventListener('click', ()=>{
@@ -1834,6 +2053,7 @@ window.addEventListener('load', async ()=>{
   loadTaskBadge();
   await fetchCounties();
   await fetchContactOrganizations();
+  populateIndustryFilterMenu();
   if(['#search', '#search_roles', '#groups'].includes(window.location.hash)){
     const view = window.location.hash === '#search_roles' ? 'organizations'
       : window.location.hash === '#groups' ? 'groups' : 'people'

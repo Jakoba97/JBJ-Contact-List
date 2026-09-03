@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>CRM Platform Contact Hub</title>
+  <title>CRM Platform Connect</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet" />
@@ -21,7 +21,7 @@
   <nav class="side-toolbar header-hidden" id="sideToolbar">
     <div class="toolbar-logo-wrap">
       <img class="toolbar-logo-img" src="/static/img/logo.Maroon.png" onerror="this.style.display='none'" alt="JBJ Management">
-      <span class="toolbar-brand-text">Contact Hub</span>
+      <span class="toolbar-brand-text">Connect</span>
     </div>
 
     <ul class="toolbar-nav-list">
@@ -181,7 +181,7 @@
               <span style="font-family:var(--font-display);font-size:0.7rem;color:var(--maroon-dark);letter-spacing:0.15em;display:block;margin-top:2px;">PLATFORM</span>
             </div>
             <div class="hero-divider" aria-hidden="true"></div>
-            <p class="hero-subtitle">Contact Hub</p>
+            <p class="hero-subtitle">Connect</p>
           </div>
 
           <!-- Section entry cards -->
@@ -236,6 +236,10 @@
                     <div class="filter-section" id="orgFilterSection">
                       <h4>Organizations <span id="orgFilterLabel" class="muted"></span></h4>
                       <div id="orgFilterMenu" class="filter-option-list"></div>
+                    </div>
+                    <div class="filter-section" id="industryFilterSection">
+                      <h4>Industry <span id="industryFilterLabel" class="muted"></span></h4>
+                      <div id="industryFilterMenu" class="filter-option-list"></div>
                     </div>
                     <div class="filter-section" id="followupFilterSection">
                       <h4>Follow-up</h4>
@@ -292,6 +296,17 @@
     </header><!-- /.site-header -->
 
     <main class="container" id="mainContent" style="display:none;">
+      <!-- Bulk "select contacts, add them all to a group" bar -- shown only
+           on the Contacts table when at least one contact is selected. -->
+      <div id="groupSelectBar" class="group-select-bar" style="display:none;">
+        <span id="groupSelectCount"></span>
+        <div class="export-wrap" id="addToGroupWrap">
+          <button id="addToGroupBtn" class="btn btn-primary btn-sm" type="button"><i class="fas fa-layer-group"></i> Add to Group</button>
+          <div id="addToGroupMenu" class="export-menu" style="display:none;"></div>
+        </div>
+        <button id="clearGroupSelectBtn" class="btn btn-sm" type="button">Clear</button>
+      </div>
+
       <section id="results" class="contacts-table-wrap" aria-live="polite"></section>
 
       <nav class="pagination" aria-label="Pagination">
@@ -299,6 +314,14 @@
         <div id="pages" class="pages"></div>
         <button id="nextPage" class="page-btn">Next <i class="fas fa-chevron-right"></i></button>
       </nav>
+
+      <!-- Read-only groups carried over from the "Archived Constant Contact"
+           import column -- not real Groups, just a view of legacy list
+           membership from Constant Contact. Only shown on the Groups tab. -->
+      <section id="archivedGroupsSection" style="display:none;margin-top:32px;">
+        <h3 class="detail-section-title" style="margin-bottom:14px;"><i class="fas fa-box-archive"></i> Archived Constant Contact</h3>
+        <div id="archivedGroupsGrid" class="results-grid"></div>
+      </section>
     </main>
 
     <!-- ═══════════════════════ MODALS ═══════════════════════ -->
@@ -316,7 +339,7 @@
         <h2 id="addOrgTitle">Add Organization</h2>
         <form id="addOrgForm" class="modal-form">
           <label>Organization name<br><input id="addOrgName" type="text" placeholder="e.g. Dallas Regional Chamber" /></label>
-          <label>Industry<br><input id="addOrgTag" type="text" list="addOrgTagOptions" placeholder="e.g. Dallas Civic" autocomplete="off" /></label>
+          <label>Industry<br><input id="addOrgTag" type="text" list="addOrgTagOptions" placeholder="e.g. Local Government" autocomplete="off" /></label>
           <datalist id="addOrgTagOptions"></datalist>
           <label>Notes<br><textarea id="addOrgNotes" rows="3" placeholder="Anything worth noting about this organization"></textarea></label>
           <div id="addOrgStatus" class="flag flag-warn" style="display:none;margin-top:10px;"></div>

@@ -94,6 +94,11 @@ main{padding:24px 0}
 .favorite-btn:hover{color:var(--amber)}
 .favorite-btn.is-favorite{color:var(--amber)}
 .detail-main h2 .favorite-btn{font-size:18px;vertical-align:middle}
+.group-select-btn{background:none;border:0;cursor:pointer;color:var(--gray);font-size:16px;padding:4px;line-height:1;flex-shrink:0}
+.group-select-btn:hover{color:var(--maroon)}
+.group-select-btn.is-selected{color:var(--maroon)}
+.group-select-bar{display:flex;align-items:center;gap:12px;background:#fff;border-radius:var(--radius);box-shadow:var(--card-shadow);padding:12px 18px;margin-bottom:12px}
+.group-select-bar #groupSelectCount{font-size:14px;font-weight:600;color:var(--charcoal)}
 .card-recency{font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 
 .pills{display:flex;gap:8px;flex-wrap:wrap}
@@ -507,7 +512,7 @@ main{padding:24px 0}
 .contacts-table tbody tr{cursor:pointer;transition:background 0.12s}
 .contacts-table tbody tr:hover{background:#f7f7f7}
 .contacts-table tbody tr.selected{background:rgba(173,3,4,0.05)}
-.contacts-table .col-star{width:32px;padding-right:0}
+.contacts-table .col-star{width:60px;padding-right:0;white-space:nowrap}
 .contacts-table .col-phone{min-width:160px;white-space:nowrap}
 .contacts-table .col-actions{white-space:nowrap}
 .contacts-table .contact-name-link{color:var(--maroon);font-weight:600;text-decoration:none}

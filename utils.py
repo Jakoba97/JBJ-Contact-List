@@ -77,6 +77,7 @@ def clean_dataframe(df: pd.DataFrame) -> list:
     org_col             = pick('company', 'organization', 'org')
     industry_col        = pick('industry')
     lists_col           = pick('email lists', 'lists', 'list')
+    archived_cc_col     = pick('archived constant contact', 'archived_constant_contact')
     tag_col             = pick('tag')
     county_col          = pick('county')
     title_col           = pick('role / title', 'role/title', 'title', 'position')
@@ -133,6 +134,7 @@ def clean_dataframe(df: pd.DataFrame) -> list:
         phone_cell     = normalize_phone(get_raw(phone_personal_col)) if phone_personal_col else None
         phone_misc     = normalize_phone(get_raw(phone_misc_col))     if phone_misc_col     else None
         lists          = split_lists(r.get(lists_col))                if lists_col          else []
+        archived_cc    = split_lists(r.get(archived_cc_col))          if archived_cc_col    else []
         tag            = get_raw(tag_col)                              if tag_col            else ''
         county         = get_raw(county_col)                          if county_col         else None
         title          = get_raw(title_col)                           if title_col          else None
@@ -177,6 +179,7 @@ def clean_dataframe(df: pd.DataFrame) -> list:
             'phone_misc': phone_misc,
             'active': active,
             'lists': lists,
+            'archived_constant_contact': archived_cc,
             'tag': tag,
             'county': county,
             'notes': notes,

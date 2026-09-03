@@ -100,6 +100,12 @@ class Contact(db.Model):
     unsubscribe_token = db.Column(db.String(64), unique=True, nullable=True, index=True)
     pipeline_stage = db.Column(db.String(32), nullable=True, index=True)
     deleted_at = db.Column(db.DateTime, nullable=True, index=True)
+    # Group names from the "Archived Constant Contact" import column --
+    # lists this person belonged to in Constant Contact (a different email
+    # tool used before this app), carried over for reference only. Not a
+    # real Group: no membership UI, just a read-only view derived from
+    # import data. Same shape/handling as `lists` (JSON array of strings).
+    archived_constant_contact = db.Column(db.JSON, nullable=True)
 
     # Extended fields from the expanded spreadsheet format
     salutation           = db.Column(db.String(64), nullable=True)
@@ -140,6 +146,7 @@ class Contact(db.Model):
             'added': self.added.isoformat() if self.added else None,
             'active': self.active,
             'lists': self.lists or [],
+            'archived_constant_contact': self.archived_constant_contact or [],
             'county': self.county,
             'notes': self.notes,
             'data_complete': bool(self.data_complete),

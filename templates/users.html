@@ -75,10 +75,6 @@
 
         <div id="nuPermSection">
           <div class="perm-section-label">Actions</div>
-          <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-            <input id="nuDraftEmail" type="checkbox">
-            <span><i class="fas fa-pen-to-square" style="width:16px;color:var(--maroon);"></i> Can draft emails (AI)</span>
-          </label>
           <label style="display:flex;align-items:center;gap:8px;">
             <input id="nuExport" type="checkbox">
             <span><i class="fas fa-file-arrow-down" style="width:16px;color:var(--maroon);"></i> Can export / download contacts</span>
@@ -136,7 +132,10 @@
               {% endfor %}
             {% endif %}
             <td class="muted">{{ u.created_at.strftime('%Y-%m-%d') }}</td>
-            <td>
+            <td style="white-space:nowrap;">
+              <button class="btn edit-user-btn" data-user-id="{{ u.id }}" data-username="{{ u.username }}" data-display-name="{{ u.display_name }}">
+                <i class="fas fa-pen"></i> Edit
+              </button>
               <button class="btn reset-password-btn" data-user-id="{{ u.id }}" data-username="{{ u.username }}">
                 <i class="fas fa-key"></i> Reset Password
               </button>
@@ -148,6 +147,23 @@
     </section>
 
   </main>
+  </div>
+
+  <!-- Edit user modal -->
+  <div id="editUserModal" class="modal" style="display:none;">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="editUserTitle">
+      <button id="closeEditUserModal" class="close">×</button>
+      <h2 id="editUserTitle">Edit User</h2>
+      <form id="editUserForm" class="modal-form">
+        <label>Display name<br><input id="euDisplayName" type="text" /></label>
+        <label>Username<br><input id="euUsername" type="text" autocomplete="off" /></label>
+        <div id="editUserError" class="flag flag-warn" style="display:none;margin-top:10px;"></div>
+        <div style="margin-top:10px">
+          <button id="editUserConfirmBtn" type="button" class="btn btn-primary"><i class="fas fa-check"></i> Save</button>
+          <button id="closeEditUserBtn" type="button" class="btn">Close</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <!-- Reset password modal -->
@@ -183,7 +199,6 @@
         display_name: document.getElementById('nuDisplayName').value.trim(),
         password: document.getElementById('nuPassword').value,
         is_admin: nuIsAdmin.checked,
-        can_draft_email: document.getElementById('nuDraftEmail').checked,
         can_export_contacts: document.getElementById('nuExport').checked,
       };
       const res = await fetch('/api/users', {
@@ -219,6 +234,57 @@
         btn.className = 'perm-toggle ' + (newVal ? 'on' : 'off');
         btn.innerHTML = `<i class="fas ${newVal ? 'fa-check' : 'fa-xmark'}"></i> ${newVal ? 'On' : 'Off'}`;
       });
+    });
+
+    // Edit user modal
+    let editTargetId = null;
+    const editUserModal = document.getElementById('editUserModal');
+
+    document.querySelectorAll('.edit-user-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        editTargetId = btn.dataset.userId;
+        document.getElementById('euDisplayName').value = btn.dataset.displayName;
+        document.getElementById('euUsername').value = btn.dataset.username;
+        document.getElementById('editUserError').style.display = 'none';
+        editUserModal.style.display = '';
+        document.getElementById('euDisplayName').focus();
+      });
+    });
+
+    document.getElementById('closeEditUserModal').addEventListener('click', () => {
+      editUserModal.style.display = 'none';
+    });
+    document.getElementById('closeEditUserBtn').addEventListener('click', () => {
+      editUserModal.style.display = 'none';
+    });
+
+    document.getElementById('editUserConfirmBtn').addEventListener('click', async () => {
+      const errEl = document.getElementById('editUserError');
+      errEl.style.display = 'none';
+      const display_name = document.getElementById('euDisplayName').value.trim();
+      const username = document.getElementById('euUsername').value.trim();
+      if (!username) {
+        errEl.textContent = 'Username is required.';
+        errEl.style.display = 'block';
+        return;
+      }
+      try {
+        const res = await fetch(`/api/users/${editTargetId}`, {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({display_name, username}),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          errEl.textContent = j.error || 'Could not save changes.';
+          errEl.style.display = 'block';
+          return;
+        }
+        location.reload();
+      } catch (e) {
+        errEl.textContent = 'Could not reach the server.';
+        errEl.style.display = 'block';
+      }
     });
 
     // Reset password modal

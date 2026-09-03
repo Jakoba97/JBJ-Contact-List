@@ -110,7 +110,7 @@ def contact_incomplete_clause():
     return and_(no_email, no_phone)  # a contact is "incomplete" only when email AND all phones are missing
 
 
-def filtered_contacts_query(q=None, tag=None, county=None, contact_id=None, group_id=None, org_tag=None, organization=None, followup=None, favorites_only=False, incomplete_only=False, show_deleted=False):
+def filtered_contacts_query(q=None, tag=None, county=None, contact_id=None, group_id=None, org_tag=None, organization=None, industry=None, followup=None, favorites_only=False, incomplete_only=False, show_deleted=False):
     """Shared filter logic for /api/contacts and the export endpoints, so
     exports always match what's currently shown on screen.
 
@@ -162,6 +162,10 @@ def filtered_contacts_query(q=None, tag=None, county=None, contact_id=None, grou
         orgs = [o.lower() for o in split_multi(organization)]  # split into a list and lowercase for case-insensitive matching
         if orgs:
             query = query.filter(func.lower(Contact.organization).in_(orgs))  # only keep contacts at one of those organizations
+    if industry:                                               # if one or more industries are selected...
+        industries = split_multi(industry)                     # split into a list
+        if industries:
+            query = query.filter(Contact.industry.in_(industries))  # only keep contacts in one of those industries
     if county:                                                 # if a county filter is selected...
         counties = split_multi(county)                         # split into a list of county names
         clause = county_filter_clause(counties)                # build the flexible county matching rule (handles "Dallas, Tarrant" combos)
@@ -234,6 +238,7 @@ ACTION_LABELS = {                                              # maps internal a
     'group_deleted': 'Deleted group',
     'spreadsheet_sync': 'Synced spreadsheet',
     'user_created': 'Created user login',
+    'user_updated': 'Edited user login',
     'password_reset': 'Reset password for',
     'case_study_created': 'Added case study',
     'case_study_updated': 'Edited case study',
@@ -614,6 +619,12 @@ def _import_contacts(df, result, archive_missing=False):
             if merged != existing_lists:               # if the merged list is different from what was there before...
                 existing.lists = merged                # update the contact's list memberships
                 changed = True
+            existing_archived = existing.archived_constant_contact or []  # same merge, for the "Archived Constant Contact" import column
+            new_archived = row.get('archived_constant_contact') or []
+            merged_archived = list(dict.fromkeys(existing_archived + new_archived))
+            if merged_archived != existing_archived:
+                existing.archived_constant_contact = merged_archived
+                changed = True
             if existing.data_complete != bool(row.get('data_complete')):  # if the "data complete" flag changed...
                 existing.data_complete = bool(row.get('data_complete'))
                 changed = True
@@ -635,6 +646,7 @@ def _import_contacts(df, result, archive_missing=False):
                 email=email or None,
                 active=row.get('active') or None,
                 lists=row.get('lists') or [],
+                archived_constant_contact=row.get('archived_constant_contact') or [],
                 county=row.get('county') or None,
                 notes=row.get('notes') or None,
                 industry=row.get('industry') or None,
@@ -801,6 +813,12 @@ def create_app(config_class=Config):
             # the schema still requires).
             "DROP INDEX IF EXISTS ix_contacts_is_favorite",
             "ALTER TABLE contacts DROP COLUMN is_favorite",
+            # SQLite has no "IF NOT EXISTS" for ADD COLUMN (it's a syntax
+            # error there, silently swallowed below) -- a bare ADD COLUMN
+            # works on both SQLite and Postgres and re-running it once the
+            # column exists just fails safely into the except, same as the
+            # DROP COLUMN above.
+            "ALTER TABLE contacts ADD COLUMN archived_constant_contact JSON",
         ]:
             try:
                 db.session.execute(db.text(stmt))    # run each ALTER TABLE statement
@@ -1358,6 +1376,26 @@ def create_app(config_class=Config):
         log_audit('user_created', 'user', user.id, username, {'is_admin': is_admin})
         return jsonify(user.to_dict()), 201
 
+    @app.route('/api/users/<int:user_id>', methods=['PUT'])
+    def update_user(user_id):
+        if not current_user.is_admin:
+            return jsonify({'error': 'admin only'}), 403
+        user = User.query.get_or_404(user_id)
+        data = request.get_json(force=True) or {}
+        if 'username' in data:
+            new_username = (data.get('username') or '').strip()
+            if not new_username:
+                return jsonify({'error': 'username is required'}), 400
+            conflict = User.query.filter(func.lower(User.username) == new_username.lower(), User.id != user.id).first()
+            if conflict:
+                return jsonify({'error': 'that username is already taken'}), 409
+            user.username = new_username
+        if 'display_name' in data:
+            user.display_name = (data.get('display_name') or '').strip() or user.username
+        db.session.commit()
+        log_audit('user_updated', 'user', user.id, user.username)
+        return jsonify(user.to_dict())
+
     @app.route('/api/users/<int:user_id>/reset-password', methods=['POST'])
     def reset_user_password(user_id):
         # There's no self-service "forgot password" flow (no email service
@@ -1505,6 +1543,7 @@ def create_app(config_class=Config):
         tag = parse_multi_param('tag')
         county = parse_multi_param('county')
         organization = parse_multi_param('organization')
+        industry = parse_multi_param('industry')
         followup = request.args.get('followup', type=str)
         favorites_only = request.args.get('favorites_only', type=str) in ('1', 'true', 'True')
         incomplete_only = request.args.get('incomplete_only', type=str) in ('1', 'true', 'True')
@@ -1512,7 +1551,7 @@ def create_app(config_class=Config):
         page = request.args.get('page', default=1, type=int)
         limit = request.args.get('limit', default=25, type=int)
 
-        query = filtered_contacts_query(q=q, tag=tag, county=county, organization=organization, followup=followup, favorites_only=favorites_only, incomplete_only=incomplete_only, show_deleted=show_deleted)
+        query = filtered_contacts_query(q=q, tag=tag, county=county, organization=organization, industry=industry, followup=followup, favorites_only=favorites_only, incomplete_only=incomplete_only, show_deleted=show_deleted)
 
         total = query.count()
         results = query.order_by(func.lower(Contact.first_name), func.lower(Contact.last_name)).offset((page - 1) * limit).limit(limit).all()
@@ -2048,13 +2087,26 @@ def create_app(config_class=Config):
 
     @app.route('/api/groups/<int:group_id>/contacts', methods=['POST'])
     def add_group_contact(group_id):
+        # Accepts either a single `contact_id` (the original one-at-a-time
+        # add-member picker) or a `contact_ids` list (bulk "select contacts,
+        # add them all to a group" action from the contacts table).
         g = Group.query.get_or_404(group_id)
         data = request.get_json() or {}
-        contact_id = data.get('contact_id')
-        contact = Contact.query.get_or_404(contact_id)
+        new_ids = list(data.get('contact_ids') or [])
+        if data.get('contact_id') is not None:
+            new_ids.append(data.get('contact_id'))
+        if not new_ids:
+            return jsonify({'error': 'contact_id or contact_ids is required'}), 400
+        valid_ids = {c.id for c in Contact.query.filter(Contact.id.in_(new_ids)).all()}
+        if not valid_ids:
+            return jsonify({'error': 'no matching contacts found'}), 404
         ids = list(g.contact_ids or [])
-        if contact.id not in ids:
-            ids.append(contact.id)
+        changed = False
+        for cid in valid_ids:
+            if cid not in ids:
+                ids.append(cid)
+                changed = True
+        if changed:
             g.contact_ids = ids
             db.session.commit()
         return jsonify(g.to_dict())
@@ -2066,6 +2118,34 @@ def create_app(config_class=Config):
         g.contact_ids = ids
         db.session.commit()
         return jsonify(g.to_dict())
+
+    # --- Archived Constant Contact groups — read-only, sourced from the
+    # "Archived Constant Contact" import column rather than a real Group
+    # row, so there's no create/edit/delete/add-member here, just a list
+    # and a per-group member view. ---
+    @app.route('/api/archived-groups', methods=['GET'])
+    def list_archived_groups():
+        rows = db.session.query(Contact.archived_constant_contact).filter(
+            Contact.deleted_at.is_(None),
+            Contact.archived_constant_contact.isnot(None),
+        ).all()
+        counts = {}
+        for (names,) in rows:
+            for name in (names or []):
+                counts[name] = counts.get(name, 0) + 1
+        groups = [{'name': name, 'contact_count': count} for name, count in counts.items()]
+        groups.sort(key=lambda g: g['name'].lower())
+        return jsonify(groups)
+
+    @app.route('/api/archived-groups/<path:name>', methods=['GET'])
+    def get_archived_group(name):
+        contacts = Contact.query.filter(
+            Contact.deleted_at.is_(None),
+            Contact.archived_constant_contact.isnot(None),
+        ).all()
+        matched = [c for c in contacts if name in (c.archived_constant_contact or [])]
+        matched.sort(key=lambda c: ((c.first_name or '').lower(), (c.last_name or '').lower()))
+        return jsonify({'name': name, 'contact_count': len(matched), 'contacts': contacts_schema.dump(matched)})
 
     # --- Background file upload & import pipeline — Kadin Lee-Smith ---
     @app.route('/api/upload', methods=['POST'])
@@ -2082,7 +2162,7 @@ def create_app(config_class=Config):
         _upload_tasks[task_id] = {'status': 'running', 'progress': 0, 'result': None, 'error': None}
         t = threading.Thread(
             target=_run_import_task,
-            args=(app._get_current_object(), task_id, file_bytes, filename, archive_missing),
+            args=(app, task_id, file_bytes, filename, archive_missing),
             daemon=True,
         )
         t.start()
@@ -2173,12 +2253,13 @@ def create_app(config_class=Config):
         tag = parse_multi_param('tag')
         org_tag = parse_multi_param('org_tag')
         organization = parse_multi_param('organization')
+        industry = parse_multi_param('industry')
         county = parse_multi_param('county')
         followup = request.args.get('followup', type=str)
         favorites_only = request.args.get('favorites_only', type=str) in ('1', 'true', 'True')
         contact_id = request.args.get('id', type=int)
         group_id = request.args.get('group_id', type=int)
-        rows = filtered_contacts_query(q=q, tag=tag, org_tag=org_tag, organization=organization, county=county, contact_id=contact_id, group_id=group_id, followup=followup, favorites_only=favorites_only).order_by(func.lower(Contact.first_name), func.lower(Contact.last_name)).all()
+        rows = filtered_contacts_query(q=q, tag=tag, org_tag=org_tag, organization=organization, industry=industry, county=county, contact_id=contact_id, group_id=group_id, followup=followup, favorites_only=favorites_only).order_by(func.lower(Contact.first_name), func.lower(Contact.last_name)).all()
 
         # stream CSV
         si = io.StringIO()
@@ -2205,11 +2286,12 @@ def create_app(config_class=Config):
         tag = parse_multi_param('tag')
         org_tag = parse_multi_param('org_tag')
         organization = parse_multi_param('organization')
+        industry = parse_multi_param('industry')
         county = parse_multi_param('county')
         followup = request.args.get('followup', type=str)
         favorites_only = request.args.get('favorites_only', type=str) in ('1', 'true', 'True')
         group_id = request.args.get('group_id', type=int)
-        rows = filtered_contacts_query(q=q, tag=tag, org_tag=org_tag, organization=organization, county=county, group_id=group_id, followup=followup, favorites_only=favorites_only).all()
+        rows = filtered_contacts_query(q=q, tag=tag, org_tag=org_tag, organization=organization, industry=industry, county=county, group_id=group_id, followup=followup, favorites_only=favorites_only).all()
 
         emails = []
         seen = set()
@@ -2236,11 +2318,12 @@ def create_app(config_class=Config):
         tag = parse_multi_param('tag')
         org_tag = parse_multi_param('org_tag')
         organization = parse_multi_param('organization')
+        industry = parse_multi_param('industry')
         county = parse_multi_param('county')
         followup = request.args.get('followup', type=str)
         favorites_only = request.args.get('favorites_only', type=str) in ('1', 'true', 'True')
         group_id = request.args.get('group_id', type=int)
-        rows = filtered_contacts_query(q=q, tag=tag, org_tag=org_tag, organization=organization, county=county, group_id=group_id, followup=followup, favorites_only=favorites_only).order_by(Contact.organization, Contact.last_name).all()
+        rows = filtered_contacts_query(q=q, tag=tag, org_tag=org_tag, organization=organization, industry=industry, county=county, group_id=group_id, followup=followup, favorites_only=favorites_only).order_by(Contact.organization, Contact.last_name).all()
 
         group = Group.query.get(group_id) if group_id else None
         doc = Document()

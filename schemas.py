@@ -14,6 +14,7 @@ class ContactSchema(Schema):
     added = fields.DateTime(dump_only=True)
     active = fields.Str(allow_none=True)
     lists = fields.List(fields.Str())
+    archived_constant_contact = fields.List(fields.Str())
     county = fields.Str(allow_none=True)
     industry = fields.Str(allow_none=True)
     notes = fields.Str(allow_none=True)
