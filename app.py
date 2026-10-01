@@ -2160,6 +2160,17 @@ def create_app(config_class=Config):
         archive_missing = request.form.get('archive_missing') == '1'
         task_id = str(uuid_mod.uuid4())
         _upload_tasks[task_id] = {'status': 'running', 'progress': 0, 'result': None, 'error': None}
+        # Vercel freezes the function once the response is sent (killing any
+        # background thread) and status polls can land on a different
+        # instance, so run the import inside the request and return the
+        # result directly -- admin.js's doUpload() already handles a response
+        # with no task_id.
+        if os.environ.get('VERCEL'):
+            _run_import_task(app, task_id, file_bytes, filename, archive_missing)
+            task = _upload_tasks.pop(task_id)
+            if task['status'] == 'error':
+                return jsonify({'error': task['error']}), 500
+            return jsonify(task['result'])
         t = threading.Thread(
             target=_run_import_task,
             args=(app, task_id, file_bytes, filename, archive_missing),

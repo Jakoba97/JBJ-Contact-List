@@ -23,8 +23,9 @@ class Config:
     JSON_SORT_KEYS = False
     SECRET_KEY = os.environ.get("SECRET_KEY", "change-me")
 
-    # Render sets RENDER=true on every deployed service; use that to harden
-    # session cookies in production without breaking local http:// dev.
-    SESSION_COOKIE_SECURE = bool(os.environ.get("RENDER"))
+    # Vercel sets VERCEL=1 (and Render sets RENDER=true) on every deployment;
+    # use that to harden session cookies in production without breaking
+    # local http:// dev.
+    SESSION_COOKIE_SECURE = bool(os.environ.get("VERCEL") or os.environ.get("RENDER"))
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
