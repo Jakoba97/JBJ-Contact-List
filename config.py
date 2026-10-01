@@ -9,6 +9,10 @@ def _normalize_database_url(url):
     # postgres:// -- SQLAlchemy only accepts the postgresql:// scheme.
     if url and url.startswith("postgres://"):
         return "postgresql://" + url[len("postgres://"):]
+    # Vercel's Neon integration hands out postgresql+psycopg:// (psycopg 3),
+    # but only psycopg2 is installed -- point it at the default driver.
+    if url and url.startswith("postgresql+psycopg://"):
+        return "postgresql://" + url[len("postgresql+psycopg://"):]
     return url
 
 
