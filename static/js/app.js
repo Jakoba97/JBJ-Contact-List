@@ -756,6 +756,13 @@ async function showGroupDetail(groupId){
 
 // Archived Constant Contact groups -- read-only, sourced from the
 // "Archived Constant Contact" import column rather than a real Group row.
+// Looked up by g.id (derived from the name server-side), never by name in
+// the URL. Names come straight from imported spreadsheets and contain
+// "&", "|", quotes and the odd "<", so they're escaped before innerHTML.
+function escHtml(s){
+  return String(s ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))
+}
+
 function renderArchivedGroupCard(g){
   const div = document.createElement('div')
   div.className = 'card'
@@ -764,7 +771,7 @@ function renderArchivedGroupCard(g){
     <div class="card-top">
       <div class="avatar md"><i class="fas fa-box-archive"></i></div>
       <div>
-        <h3>${g.name||''}</h3>
+        <h3>${escHtml(g.name)}</h3>
         <div class="meta">${g.contact_count||0} contact${g.contact_count===1?'':'s'}</div>
       </div>
     </div>
@@ -772,7 +779,7 @@ function renderArchivedGroupCard(g){
       <button class="btn btn-sm view-btn"><i class="fas fa-eye"></i> View</button>
     </div>
   `
-  div.addEventListener('click', ()=> showArchivedGroupDetail(g.name))
+  div.addEventListener('click', ()=> showArchivedGroupDetail(g.id))
   return div
 }
 
@@ -792,9 +799,9 @@ async function fetchArchivedGroups(){
   }catch(e){ grid.innerHTML = '<div class="muted">Could not load archived groups.</div>' }
 }
 
-async function showArchivedGroupDetail(name){
+async function showArchivedGroupDetail(id){
   try{
-    const res = await fetch(`/api/archived-groups/${encodeURIComponent(name)}`)
+    const res = await fetch(`/api/archived-groups/${encodeURIComponent(id)}`)
     if(!res.ok){ toast('Could not load group.', 'error'); return }
     const g = await res.json()
     const panel = el('modalBody')
@@ -820,7 +827,7 @@ async function showArchivedGroupDetail(name){
       <div class="detail-card">
         <div class="detail-photo photo-placeholder"><i class="fas fa-box-archive"></i></div>
         <div class="detail-main">
-          <h2>${g.name||''}</h2>
+          <h2>${escHtml(g.name)}</h2>
           <div class="detail-sub">${g.contact_count||0} contact${g.contact_count===1?'':'s'} • Archived Constant Contact</div>
           <h4 class="detail-section-title" style="margin-top:14px;"><i class="fas fa-users"></i> Members</h4>
           ${membersHtml}

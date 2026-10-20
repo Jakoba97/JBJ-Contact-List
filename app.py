@@ -8,6 +8,7 @@
 import os                       # lets the app read environment variables (like API keys) from your .env file
 import io                       # handles data in memory, like reading/writing files without saving them to disk first
 import csv                      # lets the app read and write CSV spreadsheet files (like contact exports)
+import hashlib                  # makes short fixed IDs from text (used for Archived Constant Contact group IDs)
 import threading                # allows multiple tasks to run at the same time in the background
 import uuid as uuid_mod         # generates unique random IDs (like "a3f9b2c1-...") for database records
 from datetime import date, datetime, timedelta  # tools for working with dates and times (today's date, adding 7 days, etc.)
@@ -2122,7 +2123,13 @@ def create_app(config_class=Config):
     # --- Archived Constant Contact groups — read-only, sourced from the
     # "Archived Constant Contact" import column rather than a real Group
     # row, so there's no create/edit/delete/add-member here, just a list
-    # and a per-group member view. ---
+    # and a per-group member view. Groups are looked up by an ID derived
+    # from the name, not the name itself: names contain "|", "&", "/" and
+    # quotes, and on Vercel the URL path reaches Flask still percent-encoded,
+    # so a name in the path never matched ("2020%20Influencers"). ---
+    def archived_group_id(name):
+        return hashlib.sha1(name.encode('utf-8')).hexdigest()[:16]
+
     @app.route('/api/archived-groups', methods=['GET'])
     def list_archived_groups():
         rows = db.session.query(Contact.archived_constant_contact).filter(
@@ -2133,19 +2140,29 @@ def create_app(config_class=Config):
         for (names,) in rows:
             for name in (names or []):
                 counts[name] = counts.get(name, 0) + 1
-        groups = [{'name': name, 'contact_count': count} for name, count in counts.items()]
+        groups = [{'id': archived_group_id(name), 'name': name, 'contact_count': count}
+                  for name, count in counts.items()]
         groups.sort(key=lambda g: g['name'].lower())
         return jsonify(groups)
 
-    @app.route('/api/archived-groups/<path:name>', methods=['GET'])
-    def get_archived_group(name):
+    @app.route('/api/archived-groups/<group_id>', methods=['GET'])
+    def get_archived_group(group_id):
         contacts = Contact.query.filter(
             Contact.deleted_at.is_(None),
             Contact.archived_constant_contact.isnot(None),
         ).all()
-        matched = [c for c in contacts if name in (c.archived_constant_contact or [])]
+        name, matched = None, []
+        for c in contacts:
+            for n in (c.archived_constant_contact or []):
+                if archived_group_id(n) == group_id:
+                    name = n
+                    matched.append(c)
+                    break
+        if name is None:
+            return jsonify({'error': 'group not found'}), 404
         matched.sort(key=lambda c: ((c.first_name or '').lower(), (c.last_name or '').lower()))
-        return jsonify({'name': name, 'contact_count': len(matched), 'contacts': contacts_schema.dump(matched)})
+        return jsonify({'id': group_id, 'name': name, 'contact_count': len(matched),
+                        'contacts': contacts_schema.dump(matched)})
 
     # --- Background file upload & import pipeline — Kadin Lee-Smith ---
     @app.route('/api/upload', methods=['POST'])
