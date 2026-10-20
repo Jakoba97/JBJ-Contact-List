@@ -1,4 +1,5 @@
 .env
+.env.*
 __pycache__/
 *.pyc
 .venv/
@@ -9,4 +10,14 @@ instance/
 data/
 imports/
 backups/
+
+# Contact data exports -- real people's details, never commit them.
+MCDMasterList*.xlsx
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+*.tsv
+*.vcf
+!sample_contacts.csv
 .DS_Store
