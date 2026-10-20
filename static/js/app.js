@@ -562,16 +562,19 @@ function renderGroupCard(g){
     <div class="card-top">
       <div class="avatar md"><i class="fas fa-layer-group"></i></div>
       <div>
-        <h3>${g.name||''}</h3>
+        <h3>${escHtml(g.name)}</h3>
         <div class="meta">${g.contact_count||0} contact${g.contact_count===1?'':'s'}</div>
       </div>
     </div>
     ${g.description ? `<div class="category">${g.description}</div>` : '<div class="muted">No description</div>'}
     <div class="card-actions" style="margin-top:8px;display:flex;gap:8px;">
       <button class="btn btn-sm view-btn"><i class="fas fa-eye"></i> View</button>
+      ${window.IS_ADMIN ? '<button class="btn btn-sm card-delete-btn" title="Delete group" aria-label="Delete group"><i class="fas fa-trash"></i></button>' : ''}
     </div>
   `
   div.addEventListener('click', ()=>{ selectCard(key, div, ()=> showGroupDetail(g.id)) })
+  const delBtn = div.querySelector('.card-delete-btn')
+  if(delBtn) delBtn.addEventListener('click', e=>{ e.stopPropagation(); deleteGroup(g) })
   return div
 }
 
@@ -777,10 +780,25 @@ function renderArchivedGroupCard(g){
     </div>
     <div class="card-actions" style="margin-top:8px;display:flex;gap:8px;">
       <button class="btn btn-sm view-btn"><i class="fas fa-eye"></i> View</button>
+      ${window.IS_ADMIN ? '<button class="btn btn-sm card-delete-btn" title="Delete list" aria-label="Delete list"><i class="fas fa-trash"></i></button>' : ''}
     </div>
   `
   div.addEventListener('click', ()=> showArchivedGroupDetail(g.id))
+  const delBtn = div.querySelector('.card-delete-btn')
+  if(delBtn) delBtn.addEventListener('click', e=>{ e.stopPropagation(); deleteArchivedGroup(g) })
   return div
+}
+
+async function deleteArchivedGroup(g){
+  const n = g.contact_count || 0
+  if(!confirm(`Delete the archived list "${g.name}"? It will be removed from ${n} contact${n===1?'':'s'}. The contacts themselves are not deleted.`)) return
+  try{
+    const res = await fetch(`/api/archived-groups/${encodeURIComponent(g.id)}`, {method:'DELETE'})
+    if(!res.ok){ toast('Could not delete list.', 'error'); return }
+    closeModal()
+    toast('List deleted')
+    fetchArchivedGroups()
+  }catch(e){ toast('Could not reach the server.', 'error'); console.error(e) }
 }
 
 async function fetchArchivedGroups(){

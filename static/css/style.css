@@ -76,6 +76,12 @@ main{padding:24px 0}
 .avatar.lg{width:64px;height:64px;font-size:22px}
 .card-top{display:flex;gap:12px;align-items:flex-start}
 .card-top h3{margin:0}
+/* Long names (e.g. imported list names with no spaces to break on) wrap
+   inside the card instead of spilling out: the text column may shrink
+   (min-width:0) and words break anywhere if they must. */
+.card-top > div:last-child{flex:1;min-width:0}
+.card h3,.detail-main h2{overflow-wrap:anywhere}
+.card-actions .card-delete-btn{margin-left:auto;color:#9b1c1c}
 .card-info{flex:1;min-width:0}
 .card-name{margin:0 0 2px;font-size:15px;font-weight:700;color:var(--black);line-height:1.2}
 .card-org{font-size:13px;color:var(--charcoal);display:flex;align-items:center;gap:4px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

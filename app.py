@@ -2164,6 +2164,27 @@ def create_app(config_class=Config):
         return jsonify({'id': group_id, 'name': name, 'contact_count': len(matched),
                         'contacts': contacts_schema.dump(matched)})
 
+    @app.route('/api/archived-groups/<group_id>', methods=['DELETE'])
+    def delete_archived_group(group_id):
+        # "Deleting" an archived group removes its name from every contact's
+        # archived_constant_contact list (trashed contacts included, so it
+        # doesn't reappear on restore). The contacts themselves stay.
+        if not current_user.is_admin:
+            return jsonify({'error': 'admin only'}), 403
+        name, changed = None, 0
+        for c in Contact.query.filter(Contact.archived_constant_contact.isnot(None)).all():
+            names = c.archived_constant_contact or []
+            kept = [n for n in names if archived_group_id(n) != group_id]
+            if len(kept) != len(names):
+                name = next(n for n in names if archived_group_id(n) == group_id)
+                c.archived_constant_contact = kept  # new list, so SQLAlchemy sees the change
+                changed += 1
+        if name is None:
+            return jsonify({'error': 'group not found'}), 404
+        db.session.commit()
+        log_audit('archived_group_deleted', 'archived_group', None, name, {'contacts_updated': changed})
+        return jsonify({'deleted': True, 'name': name, 'contacts_updated': changed})
+
     # --- Background file upload & import pipeline — Kadin Lee-Smith ---
     @app.route('/api/upload', methods=['POST'])
     def upload():

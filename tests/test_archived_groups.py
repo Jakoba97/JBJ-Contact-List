@@ -46,3 +46,37 @@ def test_archived_group_detail_by_id_matches_card_count(app, standard_client):
 def test_archived_group_unknown_id_is_404(app, standard_client):
     _seed(app)
     assert standard_client.get('/api/archived-groups/0000000000000000').status_code == 404
+
+
+def _group_id(client, name):
+    return next(g['id'] for g in client.get('/api/archived-groups').get_json() if g['name'] == name)
+
+
+def test_delete_archived_group_requires_admin(app, standard_client):
+    _seed(app)
+    gid = _group_id(standard_client, TRICKY[1])
+    assert standard_client.delete(f'/api/archived-groups/{gid}').status_code == 403
+    assert standard_client.get(f'/api/archived-groups/{gid}').status_code == 200
+
+
+def test_admin_delete_archived_group_removes_only_that_name(app, admin_client):
+    _seed(app)
+    with app.app_context():
+        before = Contact.query.count()  # the app seeds demo contacts on startup too
+    gid = _group_id(admin_client, TRICKY[1])
+    res = admin_client.delete(f'/api/archived-groups/{gid}')
+    assert res.status_code == 200
+    assert res.get_json() == {'deleted': True, 'name': TRICKY[1], 'contacts_updated': 2}
+
+    names = {g['name'] for g in admin_client.get('/api/archived-groups').get_json()}
+    assert names == {TRICKY[0], TRICKY[2], TRICKY[3]}
+    assert admin_client.get(f'/api/archived-groups/{gid}').status_code == 404
+    with app.app_context():
+        assert Contact.query.count() == before  # contacts are kept
+        bob = Contact.query.filter_by(first_name='Bob').one()
+        assert bob.archived_constant_contact == [TRICKY[2], TRICKY[3]]
+
+
+def test_delete_unknown_archived_group_is_404(app, admin_client):
+    _seed(app)
+    assert admin_client.delete('/api/archived-groups/0000000000000000').status_code == 404
