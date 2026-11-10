@@ -11,6 +11,7 @@ import csv                      # lets the app read and write CSV spreadsheet fi
 import hashlib                  # makes short fixed IDs from text (used for Archived Constant Contact group IDs)
 import threading                # allows multiple tasks to run at the same time in the background
 import uuid as uuid_mod         # generates unique random IDs (like "a3f9b2c1-...") for database records
+from urllib.parse import unquote  # turns "%20" back into spaces in organization names taken from the URL
 from datetime import date, datetime, timedelta  # tools for working with dates and times (today's date, adding 7 days, etc.)
 from dotenv import load_dotenv  # reads your .env file so the app can see your API keys and secrets
 from flask import Flask, request, jsonify, send_file, render_template, redirect, url_for, abort  # Flask is the web framework powering this site; these are its main tools for handling web requests
@@ -1791,6 +1792,10 @@ def create_app(config_class=Config):
     @app.route('/organizations/<path:org_name>')
     @login_required
     def org_detail_page(org_name):
+        # On Vercel the path reaches Flask still percent-encoded
+        # ("Metroplex%20Organization..."), so the title showed %20 and no
+        # contacts matched. Locally it's already decoded and unquote is a no-op.
+        org_name = unquote(org_name)
         contacts = Contact.query.filter(
             func.lower(Contact.organization) == org_name.lower(),
             Contact.deleted_at.is_(None)
@@ -1815,12 +1820,14 @@ def create_app(config_class=Config):
     # --- Organization activity log API — Kadin Lee-Smith ---
     @app.route('/api/organizations/<organization>/activity', methods=['GET'])
     def list_org_activity(organization):
+        organization = unquote(organization)  # see org_detail_page
         rows = Activity.query.filter(func.lower(Activity.organization) == organization.lower()) \
             .order_by(Activity.contacted_on.desc(), Activity.created_at.desc()).all()
         return jsonify({'activity': [a.to_dict() for a in rows]})
 
     @app.route('/api/organizations/<organization>/activity', methods=['POST'])
     def create_org_activity(organization):
+        organization = unquote(organization)  # see org_detail_page
         data = request.get_json(silent=True) or {}
         summary = (data.get('summary') or '').strip()
         if not summary:
