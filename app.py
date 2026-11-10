@@ -1765,15 +1765,23 @@ def create_app(config_class=Config):
     @app.route('/community-directory')
     @login_required
     def community_directory():
-        civic_tags = [
+        # Shows every OutreachOrg (the same set as the main page's
+        # Organizations view), grouped by category. The original six civic
+        # categories keep their fixed order up top; any other category in the
+        # data follows alphabetically, and orgs with no category go last.
+        uncategorized = "Uncategorized"
+        civic_order = [
             "Dallas Civic", "Civil Rights & Advocacy", "Business Chambers",
             "Development & Transportation", "Nonprofit & Community", "Women's & Cultural",
         ]
-        all_orgs = OutreachOrg.query.filter(OutreachOrg.tag.in_(civic_tags)) \
-            .order_by(OutreachOrg.tag, OutreachOrg.organization).all()
+        all_orgs = OutreachOrg.query.order_by(func.lower(OutreachOrg.organization)).all()
         grouped = {}
-        for tag in civic_tags:
-            grouped[tag] = [o for o in all_orgs if o.tag == tag]
+        for o in all_orgs:
+            grouped.setdefault((o.tag or '').strip() or uncategorized, []).append(o)
+        others = sorted((t for t in grouped if t not in civic_order and t != uncategorized), key=str.lower)
+        civic_tags = [t for t in civic_order if t in grouped] + others
+        if uncategorized in grouped:
+            civic_tags.append(uncategorized)
         return render_template('community_directory.html',
             grouped=grouped,
             civic_tags=civic_tags,
@@ -2130,8 +2138,11 @@ def create_app(config_class=Config):
     def archived_group_id(name):
         return hashlib.sha1(name.encode('utf-8')).hexdigest()[:16]
 
+    # Admin-only, like the delete below: staff don't see the archived lists.
     @app.route('/api/archived-groups', methods=['GET'])
     def list_archived_groups():
+        if not current_user.is_admin:
+            return jsonify({'error': 'admin only'}), 403
         rows = db.session.query(Contact.archived_constant_contact).filter(
             Contact.deleted_at.is_(None),
             Contact.archived_constant_contact.isnot(None),
@@ -2147,6 +2158,8 @@ def create_app(config_class=Config):
 
     @app.route('/api/archived-groups/<group_id>', methods=['GET'])
     def get_archived_group(group_id):
+        if not current_user.is_admin:
+            return jsonify({'error': 'admin only'}), 403
         contacts = Contact.query.filter(
             Contact.deleted_at.is_(None),
             Contact.archived_constant_contact.isnot(None),

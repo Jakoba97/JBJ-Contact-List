@@ -185,7 +185,7 @@
 <div class="cd-header">
   <a href="/#search" class="cd-back"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
   <div class="cd-title">Dallas Community Organizations</div>
-  <div class="cd-subtitle">Civic, advocacy, chamber, development, nonprofit, and cultural organizations</div>
+  <div class="cd-subtitle">Every organization on the outreach list, grouped by category</div>
   <div class="cd-stats">
     <div class="cd-stat">
       <div class="cd-stat-num">{{ total }}</div>
@@ -231,7 +231,7 @@
   {% if orgs %}
   <div class="cd-category" data-category="{{ tag }}">
     <div class="cd-category-header">
-      <div class="cd-category-icon"><i class="fas {{ cat_icons[tag] }}"></i></div>
+      <div class="cd-category-icon"><i class="fas {{ cat_icons.get(tag, 'fa-building') }}"></i></div>
       <span class="cd-category-name">{{ tag }}</span>
       <span class="cd-category-count">{{ orgs|length }}</span>
     </div>
@@ -359,7 +359,7 @@
   function openModal(orgName, tag) {
     pendingOrg = orgName;
     cfOrg.value = orgName;
-    modalOrgLabel.textContent = tag + ' · ' + orgName;
+    modalOrgLabel.textContent = (tag && tag !== 'Uncategorized') ? tag + ' · ' + orgName : orgName;
     [cfFirst, cfLast, cfTitle, cfEmail, cfPhone].forEach(el => el.value = '');
     toast.style.display = 'none';
     toast.className = 'modal-toast';

@@ -15,7 +15,7 @@ const API = {
   archivedGroups: '/api/archived-groups',
 }
 
-let state = { page: 1, limit: 25, q: '', tags: [], counties: [], organizations: [], industries: [], followup: '', favoritesOnly: false, total: 0, view: 'people', selectedKey: null, showDeleted: false }
+let state = { page: 1, limit: 25, q: '', tags: [], counties: [], industries: [], followup: '', favoritesOnly: false, total: 0, view: 'people', selectedKey: null, showDeleted: false }
 
 // Contacts checked via the group-select button in the People table, for
 // the "select several, add them all to a group" bulk action. Persists
@@ -208,46 +208,6 @@ async function fetchCounties(){
   }catch(e){console.warn(e)}
 }
 
-function updateOrgFilterLabel(){
-  const label = el('orgFilterLabel')
-  if(!label) return
-  label.textContent = state.organizations.length ? `(${state.organizations.length} selected)` : ''
-}
-
-// Organization filter only applies to the People view -- Organizations view
-// already lists one row per organization, so filtering by organization
-// there would just be a text search, not a category filter.
-async function fetchContactOrganizations(){
-  const menu = el('orgFilterMenu')
-  if(!menu) return
-  try{
-    const res = await fetch(API.contactOrganizations)
-    const names = await res.json()
-    if(!names.length){
-      menu.innerHTML = '<div class="filter-menu-empty">No organizations on file yet.</div>'
-      updateOrgFilterLabel()
-      return
-    }
-    menu.innerHTML = names.map(name => `
-      <label class="filter-option">
-        <input type="checkbox" value="${name}" ${state.organizations.includes(name) ? 'checked' : ''}>
-        <span>${name}</span>
-      </label>
-    `).join('')
-    menu.querySelectorAll('input[type=checkbox]').forEach(cb => {
-      cb.addEventListener('change', ()=>{
-        if(cb.checked){
-          if(!state.organizations.includes(cb.value)) state.organizations.push(cb.value)
-        } else {
-          state.organizations = state.organizations.filter(o => o !== cb.value)
-        }
-        updateOrgFilterLabel()
-      })
-    })
-    updateOrgFilterLabel()
-  }catch(e){console.warn(e)}
-}
-
 function updateIndustryFilterLabel(){
   const label = el('industryFilterLabel')
   if(!label) return
@@ -280,7 +240,7 @@ function populateIndustryFilterMenu(){
 }
 
 function activeFilterCount(){
-  return state.tags.length + state.counties.length + state.organizations.length + state.industries.length
+  return state.tags.length + state.counties.length + state.industries.length
     + (state.followup ? 1 : 0) + (state.favoritesOnly ? 1 : 0)
 }
 
@@ -315,10 +275,10 @@ function bindFilterMenu(){
 
   const clearBtn = el('clearFiltersBtn')
   if(clearBtn) clearBtn.addEventListener('click', ()=>{
-    state.tags = []; state.counties = []; state.organizations = []; state.industries = []; state.followup = ''; state.favoritesOnly = false
+    state.tags = []; state.counties = []; state.industries = []; state.followup = ''; state.favoritesOnly = false
     const favCb = el('favoritesOnlyCheckbox'); if(favCb) favCb.checked = false
     const allRadio = document.querySelector('input[name=followupRadio][value=""]'); if(allRadio) allRadio.checked = true
-    fetchTagOptions(); fetchCounties(); fetchContactOrganizations(); populateIndustryFilterMenu()
+    fetchTagOptions(); fetchCounties(); populateIndustryFilterMenu()
     updateFilterCountBadge()
     state.page = 1
     search()
@@ -1307,7 +1267,6 @@ async function search(){
   if(state.q) params.set('q', state.q)
   if(state.tags.length) params.set('tag', state.tags.join(','))
   if(state.counties.length) params.set('county', state.counties.join(','))
-  if(state.view !== 'organizations' && state.organizations.length) params.set('organization', state.organizations.join(','))
   if(state.view !== 'organizations' && state.industries.length) params.set('industry', state.industries.join(','))
   if(state.view !== 'organizations' && state.followup) params.set('followup', state.followup)
   if(state.view !== 'organizations' && state.favoritesOnly) params.set('favorites_only', '1')
@@ -1389,6 +1348,15 @@ async function openProfile(id, defaults={}){
       const res = await fetch(`/api/contacts/${id}`)
       c = await res.json()
     }
+    // Tag dropdown uses the same list as the People-view Tags filter
+    // (/api/tags). A contact's existing tag is kept as an option even if it
+    // somehow isn't in the list, and "+ New tag…" reveals a text box so a
+    // brand-new tag can still be created from this form.
+    let tagNames = []
+    try{ tagNames = await (await fetch(API.tags)).json() }catch(e){ console.warn(e) }
+    if(c.tag && !tagNames.includes(c.tag)) tagNames = [c.tag, ...tagNames]
+    const escAttr = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')
+    const tagOptionsHtml = tagNames.map(t => `<option value="${escAttr(t)}" ${c.tag===t?'selected':''}>${escAttr(t)}</option>`).join('')
     const body = el('modalBody')
     body.innerHTML = `
       <h2 id="modalTitle">${id? 'Edit Contact' : 'New Contact'}</h2>
@@ -1402,8 +1370,8 @@ async function openProfile(id, defaults={}){
         <label>Email<br><input id="cf_email" value="${c.email||''}" /></label>
         <label>Office Phone<br><input id="cf_office" value="${c.phone_office||''}" /></label>
         <label>Cell Phone<br><input id="cf_cell" value="${c.phone_cell||''}" /></label>
-        <label>Tag<br><input id="cf_tag" value="${c.tag||''}" /></label>
-        <label>Lists (comma separated)<br><input id="cf_lists" value="${(c.lists||[]).join(', ')}" /></label>
+        <label>Tag<br><select id="cf_tag"><option value="">- Select -</option>${tagOptionsHtml}<option value="__new__">+ New tag…</option></select></label>
+        <input id="cf_tag_new" placeholder="New tag name" style="display:none;margin-top:6px;" />
         <label>County<br><input id="cf_county" value="${c.county||''}" /></label>
         <div id="duplicateWarning" class="flag flag-warn" style="display:none;margin-top:10px;"></div>
         <div style="margin-top:10px">
@@ -1415,6 +1383,11 @@ async function openProfile(id, defaults={}){
     `
     const modal = el('profileModal')
     if(modal){ modal.style.display = ''; modal.classList.remove('group-modal') }
+    el('cf_tag').addEventListener('change', ()=>{
+      const isNew = el('cf_tag').value === '__new__'
+      el('cf_tag_new').style.display = isNew ? '' : 'none'
+      if(isNew) el('cf_tag_new').focus()
+    })
     el('closeModalBtn').addEventListener('click', closeModal)
     el('saveContactBtn').addEventListener('click', ()=> saveContact(false))
     el('addAnywayBtn').addEventListener('click', ()=> saveContact(true))
@@ -1432,8 +1405,7 @@ async function saveContact(force){
     email: el('cf_email').value.trim(),
     phone_office: el('cf_office').value.trim(),
     phone_cell: el('cf_cell').value.trim(),
-    tag: el('cf_tag').value.trim(),
-    lists: (el('cf_lists').value||'').split(',').map(s=>s.trim()).filter(Boolean),
+    tag: el('cf_tag').value === '__new__' ? el('cf_tag_new').value.trim() : el('cf_tag').value.trim(),
     county: el('cf_county').value.trim(),
   }
   if(!id && force) payload.force_create = true
@@ -1458,7 +1430,6 @@ async function saveContact(force){
       return
     }
     fetchTagOptions()
-    fetchContactOrganizations()
     state.page = 1
     search()
     if(j && j.id) showContactDetail(j.id); else closeModal()
@@ -1505,8 +1476,6 @@ function switchView(view, userInitiated){
   document.querySelectorAll('input[name=followupRadio]').forEach(r => { r.disabled = (view === 'organizations') })
   const favoritesOnlyCheckbox = el('favoritesOnlyCheckbox')
   if(favoritesOnlyCheckbox) favoritesOnlyCheckbox.disabled = (view === 'organizations')
-  const orgFilterSection = el('orgFilterSection')
-  if(orgFilterSection) orgFilterSection.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.disabled = (view === 'organizations') })
   const industryFilterSection = el('industryFilterSection')
   if(industryFilterSection) industryFilterSection.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.disabled = (view === 'organizations') })
   // Filters/Export/Trash don't apply to Groups (it's not a filtered contact
@@ -1527,7 +1496,7 @@ function switchView(view, userInitiated){
   if(view !== 'groups') fetchTagOptions()
   const archivedSection = el('archivedGroupsSection')
   if(archivedSection) archivedSection.style.display = (view === 'groups') ? '' : 'none'
-  if(view === 'groups') fetchArchivedGroups()
+  if(view === 'groups' && window.IS_ADMIN) fetchArchivedGroups()
   search()
 }
 
@@ -2077,7 +2046,6 @@ window.addEventListener('load', async ()=>{
   bind();
   loadTaskBadge();
   await fetchCounties();
-  await fetchContactOrganizations();
   populateIndustryFilterMenu();
   if(['#search', '#search_roles', '#groups'].includes(window.location.hash)){
     const view = window.location.hash === '#search_roles' ? 'organizations'

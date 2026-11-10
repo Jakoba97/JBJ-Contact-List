@@ -233,10 +233,6 @@
                       <h4>Counties <span id="countyFilterLabel" class="muted"></span></h4>
                       <div id="countyFilterMenu" class="filter-option-list"></div>
                     </div>
-                    <div class="filter-section" id="orgFilterSection">
-                      <h4>Organizations <span id="orgFilterLabel" class="muted"></span></h4>
-                      <div id="orgFilterMenu" class="filter-option-list"></div>
-                    </div>
                     <div class="filter-section" id="industryFilterSection">
                       <h4>Industry <span id="industryFilterLabel" class="muted"></span></h4>
                       <div id="industryFilterMenu" class="filter-option-list"></div>
@@ -317,11 +313,14 @@
 
       <!-- Read-only groups carried over from the "Archived Constant Contact"
            import column -- not real Groups, just a view of legacy list
-           membership from Constant Contact. Only shown on the Groups tab. -->
+           membership from Constant Contact. Only shown on the Groups tab,
+           and only to admins (the API is admin-only too). -->
+      {% if current_user.is_admin %}
       <section id="archivedGroupsSection" style="display:none;margin-top:32px;">
         <h3 class="detail-section-title" style="margin-bottom:14px;"><i class="fas fa-box-archive"></i> Archived Constant Contact</h3>
         <div id="archivedGroupsGrid" class="results-grid"></div>
       </section>
+      {% endif %}
     </main>
 
     <!-- ═══════════════════════ MODALS ═══════════════════════ -->
