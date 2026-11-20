@@ -24,8 +24,11 @@ def split_lists(cell):
     return parts
 
 
-def clean_dataframe(df: pd.DataFrame) -> list:
+def clean_dataframe(df: pd.DataFrame, default_org: str = None) -> list:
     """
+    default_org fills a blank/missing organization instead of dropping the
+    row -- used when the import dialog assigns everyone to an organization.
+
     Clean an uploaded DataFrame-like object and return a list of plain
     dicts (not a DataFrame -- mixing strings and None in a column and
     then round-tripping through pd.DataFrame() lets pandas silently turn
@@ -126,7 +129,7 @@ def clean_dataframe(df: pd.DataFrame) -> list:
         if not first and not last:
             continue
 
-        org = get_raw(org_col)
+        org = get_raw(org_col) or default_org
         if not org:
             continue
 

@@ -28,6 +28,18 @@ function showSummary(obj){
     .filter(Boolean)
   const archived = obj.contacts && obj.contacts.archived ? ` · ${obj.contacts.archived} marked Inactive` : ''
   s.innerHTML = `<p><i class="fas fa-circle-check"></i> Synced from spreadsheet - ${lines.join(' · ')}${archived}</p>`
+  // Group / organization results. Names come from user input, so use textContent.
+  const t = obj.targets || {}
+  const extra = []
+  if(t.group) extra.push(`${t.group.added} added to ${t.group_created ? 'new ' : ''}group "${t.group.name}"`)
+  if(t.organization) extra.push(`${t.organization.total} set to ${t.organization_created ? 'new ' : ''}organization "${t.organization.name}"`)
+  const skipped = obj.contacts && obj.contacts.not_in_crm
+  if(skipped) extra.push(`${skipped} not in the CRM, skipped`)
+  extra.forEach(line=>{
+    const p = document.createElement('p')
+    p.textContent = line
+    s.appendChild(p)
+  })
   fetch('/api/categories').then(r=>r.json()).then(cat=>{
     const list = cat.map(c=>`<div>${c.tag||'<none>'}: ${c.count}</div>`).join('')
     s.innerHTML += `<h4>Category breakdown</h4>${list}`
@@ -56,12 +68,13 @@ function pollTaskStatus(task_id){
   })
 }
 
-function doUpload(file, archiveMissing){
+function doUpload(file, archiveMissing, targets){
   return new Promise((resolve, reject)=>{
     const xhr = new XMLHttpRequest()
     const fd = new FormData()
     fd.append('file', file)
     if(archiveMissing) fd.append('archive_missing', '1')
+    Object.entries(targets || {}).forEach(([k, v])=> fd.append(k, v))
     xhr.open('POST', '/api/upload')
     xhr.upload.addEventListener('progress', (e)=>{
       if(e.lengthComputable){
@@ -119,9 +132,100 @@ function closePreview(){
   _pendingFile = null
 }
 
+// ── "Add to" choices: contact list / group / organization ─────────────── //
+
+const NEW_OPTION = '__new__'
+
+function fillSelect(sel, placeholder, items, newLabel){
+  // Built with Option objects, not innerHTML: names come from spreadsheets.
+  sel.innerHTML = ''
+  sel.add(new Option(placeholder, ''))
+  items.forEach(([value, label])=> sel.add(new Option(label, value)))
+  if(newLabel) sel.add(new Option(newLabel, NEW_OPTION))
+}
+
+async function loadImportTargets(){
+  try {
+    const r = await fetch('/api/upload/targets')
+    if(!r.ok) throw new Error(`HTTP ${r.status}`)
+    const t = await r.json()
+    fillSelect($('tgtGroupSelect'), 'Choose a group…',
+      t.groups.map(g=>[String(g.id), `${g.name} (${g.contact_count})`]), '+ Create new group…')
+    fillSelect($('tgtOrgSelect'), 'Choose an organization…',
+      t.organizations.map(o=>[o, o]), '+ Create new organization…')
+    fillSelect($('tgtOrgCategory'), 'Select category…',
+      t.org_categories.map(c=>[c, c]), null)
+  } catch(e){
+    // Pickers still work for creating new ones; just no existing choices.
+    fillSelect($('tgtGroupSelect'), 'Could not load groups', [], '+ Create new group…')
+    fillSelect($('tgtOrgSelect'), 'Could not load organizations', [], '+ Create new organization…')
+    fillSelect($('tgtOrgCategory'), 'Could not load categories', [], null)
+  }
+}
+
+function syncTargetUI(){
+  const groupOn = $('tgtGroup').checked, orgOn = $('tgtOrg').checked
+  $('tgtGroupPicker').hidden = !groupOn
+  $('tgtOrgPicker').hidden = !orgOn
+  const newGroup = $('tgtGroupSelect').value === NEW_OPTION
+  const newOrg = $('tgtOrgSelect').value === NEW_OPTION
+  $('tgtGroupNew').hidden = !newGroup
+  $('tgtOrgNew').hidden = !newOrg
+  $('tgtOrgCategoryWrap').hidden = !newOrg
+  $('tgtNote').hidden = $('tgtContacts').checked || !(groupOn || orgOn)
+  $('tgtError').hidden = true
+}
+
+function resetTargets(){
+  $('tgtContacts').checked = true
+  $('tgtGroup').checked = false
+  $('tgtOrg').checked = false
+  ;['tgtGroupNew', 'tgtOrgNew'].forEach(id=> $(id).value = '')
+  ;['tgtGroupSelect', 'tgtOrgSelect', 'tgtOrgCategory'].forEach(id=> $(id).value = '')
+  syncTargetUI()
+}
+
+// Returns the form fields for /api/upload, or null (after showing why).
+function collectTargets(){
+  const err = (msg)=>{ $('tgtError').textContent = msg; $('tgtError').hidden = false; return null }
+  const out = { add_contacts: $('tgtContacts').checked ? '1' : '0' }
+  if($('tgtGroup').checked){
+    out.add_group = '1'
+    const v = $('tgtGroupSelect').value
+    if(v === NEW_OPTION){
+      const name = $('tgtGroupNew').value.trim()
+      if(!name) return err('Enter a name for the new group.')
+      out.group_name = name
+    } else if(v){
+      out.group_id = v
+    } else return err('Choose a group, or create a new one.')
+  }
+  if($('tgtOrg').checked){
+    out.add_org = '1'
+    const v = $('tgtOrgSelect').value
+    if(v === NEW_OPTION){
+      const name = $('tgtOrgNew').value.trim()
+      if(!name) return err('Enter a name for the new organization.')
+      const category = $('tgtOrgCategory').value
+      if(!category) return err('Select a category for the new organization.')
+      out.organization = name
+      out.org_category = category
+    } else if(v){
+      out.organization = v
+    } else return err('Choose an organization, or create a new one.')
+  }
+  if(out.add_contacts !== '1' && !out.add_group && !out.add_org)
+    return err('Check at least one place to add the contacts.')
+  return out
+}
+
 function confirmImport(){
+  const targets = collectTargets()
+  if(!targets) return
   $('previewModal').style.display = 'none'
-  doUpload(_pendingFile, _pendingArchive).then(showSummary).catch(handleUploadError)
+  // "Mark missing as Inactive" only makes sense for a full contact-list sync.
+  const archive = _pendingArchive && targets.add_contacts === '1'
+  doUpload(_pendingFile, archive, targets).then(showSummary).catch(handleUploadError)
 }
 
 function handleUploadError(err) {
@@ -144,6 +248,8 @@ async function previewThenUpload(file){
     if(data.error){ handleUploadError(data.error); return }
     const wrap2 = $('progressBar')?.closest('.progress-wrap')
     if(wrap2) wrap2.style.display = 'none'
+    await loadImportTargets()
+    resetTargets()
     showPreviewModal(data, file, archiveMissing)
   } catch(e){
     handleUploadError(String(e))
@@ -166,4 +272,13 @@ window.addEventListener('load', ()=>{
   }
 
   if(exportBtn) exportBtn.addEventListener('click', ()=>{ window.location.href = '/api/export' })
+
+  ;['tgtContacts', 'tgtGroup', 'tgtOrg', 'tgtGroupSelect', 'tgtOrgSelect'].forEach(id=>{
+    const node = $(id)
+    if(node) node.addEventListener('change', ()=>{
+      syncTargetUI()
+      if(id === 'tgtGroupSelect' && node.value === NEW_OPTION) $('tgtGroupNew').focus()
+      if(id === 'tgtOrgSelect' && node.value === NEW_OPTION) $('tgtOrgNew').focus()
+    })
+  })
 })

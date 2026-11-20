@@ -566,15 +566,21 @@ _SHEET_FIELDS = [                        # the list of contact fields that can b
 
 
 # --- Spreadsheet import engine — Kadin Lee-Smith ---
-def _import_contacts(df, result, archive_missing=False):
+def _import_contacts(df, result, archive_missing=False, add_to_crm=True, touched=None, default_org=None):
     """Upsert a People-sheet DataFrame into Contact.
+
+    add_to_crm=False only *matches* rows to existing contacts -- nothing is
+    created or updated, and unmatched rows are counted in
+    result['not_in_crm']. Used when an import should only fill a group or
+    organization. Every contact a row maps to (matched or newly created) is
+    appended to `touched`, so the caller can add them to a group/org.
 
     Loads all existing contacts into memory in one query, then does all
     matching in Python -- this keeps the total number of SQL round-trips
     at O(1) rather than O(n), which is critical for large sheets (24K+
     rows would time out on a remote database with per-row lookups).
     """
-    cleaned = clean_dataframe(df)  # run the raw spreadsheet data through our cleaner (normalizes column names, strips whitespace, etc.)
+    cleaned = clean_dataframe(df, default_org=default_org)  # run the raw spreadsheet data through our cleaner (normalizes column names, strips whitespace, etc.)
 
     # Flush any pending writes before querying so the query doesn't trigger
     # an autoflush mid-import (which would fail if a prior sheet wrote a row
@@ -608,8 +614,19 @@ def _import_contacts(df, result, archive_missing=False):
             existing = by_nameorg.get((fn, ln, org))   # look up whether we already have a contact with this exact name+org combo
             seen_nameorgs.add((fn, ln, org))           # mark as seen
 
+        if not add_to_crm:                             # match-only mode: never create or update
+            if existing and existing.deleted_at is None:
+                if touched is not None:
+                    touched.append(existing)
+                result['skipped'] += 1
+            else:
+                result['not_in_crm'] = result.get('not_in_crm', 0) + 1
+            continue
+
         if existing:                                   # if a matching contact already exists in the database...
-            changed = False                            # track whether we actually changed anything
+            if touched is not None:
+                touched.append(existing)
+            changed = False                           # track whether we actually changed anything
             for field in _SHEET_FIELDS:                # loop through every updatable field
                 val = row.get(field)                   # get the value from the spreadsheet row
                 if val and val != getattr(existing, field):  # if the spreadsheet has a non-blank value that differs from what's in the database...
@@ -671,6 +688,8 @@ def _import_contacts(df, result, archive_missing=False):
                 data_complete=bool(row.get('data_complete')),
             )
             db.session.add(c)   # queue the new contact to be saved to the database
+            if touched is not None:
+                touched.append(c)
             # Register in lookup so duplicate rows in the same file don't re-insert
             if email:
                 by_email[email.lower()] = c  # add to our in-memory lookup so a duplicate row later in the file matches this new contact
@@ -759,7 +778,82 @@ def extract_case_study_text(file_storage):
 _upload_tasks: dict = {}  # in-memory dictionary that tracks the status/progress of background spreadsheet import jobs
 
 
-def _run_import_task(app_obj, task_id, file_bytes, filename, archive_missing):
+# Organization (OutreachOrg) categories offered when creating an org from the
+# import dialog. Categories otherwise exist only as tags on orgs, so this list
+# lets a category be picked before any org uses it (e.g. Community
+# Stakeholders). Same order as the category chips: the six civic categories
+# first, the rest alphabetically.
+ORG_CATEGORY_ORDER = [
+    "Dallas Civic", "Civil Rights & Advocacy", "Business Chambers",
+    "Development & Transportation", "Nonprofit & Community", "Women's & Cultural",
+]
+ORG_CATEGORIES = ORG_CATEGORY_ORDER + [
+    "Advocacy Agencies", "Chamber of Commerce", "Clergy", "Community Stakeholders",
+    "County Commissioners", "Education", "State Legislators", "Town/City Council",
+]
+
+
+def ordered_org_categories(extra=()):
+    names = {c.lower(): c for c in ORG_CATEGORIES}
+    for c in extra:
+        if c and c.strip():
+            names.setdefault(c.strip().lower(), c.strip())
+    rest = sorted((c for c in names.values() if c not in ORG_CATEGORY_ORDER), key=str.lower)
+    return ORG_CATEGORY_ORDER + rest
+
+
+def _apply_import_targets(contacts, opts, result):
+    """Adds the imported contacts to the group / organization picked in the
+    import dialog. opts keys (all optional):
+      group_id      -- id of an existing Group
+      group_name    -- name for a new Group (reuses one with the same name)
+      organization  -- org name to set on every contact
+      org_category  -- category for a new OutreachOrg directory entry
+    """
+    # The same contact can appear on several rows; keep first-seen order.
+    unique = list({id(c): c for c in contacts}.values())
+    db.session.flush()  # new contacts need ids before they can join a group
+
+    group = None
+    if opts.get('group_id'):
+        group = db.session.get(Group, int(opts['group_id']))
+        if group is None:
+            raise ValueError('The selected group no longer exists.')
+    elif opts.get('group_name'):
+        name = opts['group_name']
+        group = Group.query.filter(func.lower(Group.name) == name.lower()).first()
+        if group is None:
+            group = Group(name=name, contact_ids=[], created_by_id=opts.get('user_id'))
+            db.session.add(group)
+            result['group_created'] = True
+    if group is not None:
+        ids = list(group.contact_ids or [])
+        before = len(ids)
+        for c in unique:
+            if c.id not in ids:
+                ids.append(c.id)
+        group.contact_ids = ids  # new list, so SQLAlchemy sees the change
+        result['group'] = {'name': group.name, 'added': len(ids) - before}
+
+    org = opts.get('organization')
+    if org:
+        known = OutreachOrg.query.filter(func.lower(OutreachOrg.organization) == org.lower()).first() \
+            or Contact.query.filter(func.lower(Contact.organization) == org.lower(),
+                                    Contact.id.notin_([c.id for c in unique] or [0])).first()
+        if not known:
+            # Brand-new org: give it a directory entry so it shows up in the
+            # Organizations view and sidebar, not just on its own page.
+            db.session.add(OutreachOrg(tag=opts.get('org_category') or 'Uncategorized', organization=org))
+            result['organization_created'] = True
+        changed = 0
+        for c in unique:
+            if c.organization != org:
+                c.organization = org
+                changed += 1
+        result['organization'] = {'name': org, 'assigned': changed, 'total': len(unique)}
+
+
+def _run_import_task(app_obj, task_id, file_bytes, filename, archive_missing, opts=None):
     task = _upload_tasks[task_id]                    # get the task status dict for this import job
     with app_obj.app_context():                      # run inside the Flask app context to access the database
         try:
@@ -767,6 +861,9 @@ def _run_import_task(app_obj, task_id, file_bytes, filename, archive_missing):
             fake_f = FileStorage(stream=io.BytesIO(file_bytes), filename=filename)  # wrap the raw file bytes so it looks like an uploaded file
             task['progress'] = 10                    # update progress to 10% (file loaded)
             sheets = read_uploaded_file(fake_f)      # parse the file into sheets (handles .xlsx, .csv, etc.)
+            opts = opts or {}
+            add_to_crm = opts.get('add_to_crm', True)
+            touched = []                             # every contact a row mapped to, for the group/org step
             contacts_result = {'inserted': 0, 'updated': 0, 'skipped': 0}  # track counts for contacts
             orgs_result = {'inserted': 0, 'updated': 0, 'skipped': 0}      # track counts for organizations
             sheet_list = [(k, v) for k, v in sheets.items() if v is not None and not v.empty]  # filter out any empty/None sheets
@@ -774,13 +871,17 @@ def _run_import_task(app_obj, task_id, file_bytes, filename, archive_missing):
             for i, (_, df) in enumerate(sheet_list):  # loop through each non-empty sheet
                 task['progress'] = 20 + int((i / n) * 70)  # update progress proportionally as each sheet is processed
                 if looks_like_contacts_sheet(df):    # if this sheet looks like a contacts sheet...
-                    _import_contacts(df, contacts_result, archive_missing=archive_missing)  # import it as contacts
-                elif looks_like_orgs_sheet(df):      # if it looks like an organizations sheet...
+                    _import_contacts(df, contacts_result, archive_missing=archive_missing and add_to_crm,
+                                     add_to_crm=add_to_crm, touched=touched,
+                                     default_org=opts.get('organization'))  # import it as contacts
+                elif looks_like_orgs_sheet(df) and add_to_crm:  # if it looks like an organizations sheet...
                     _import_orgs(df, orgs_result)    # import it as organizations
+            targets = {}
+            _apply_import_targets(touched, opts, targets)  # add to the chosen group / organization, if any
             db.session.commit()                      # save all changes to the database
             task['status'] = 'done'
             task['progress'] = 100                   # import complete
-            task['result'] = {'contacts': contacts_result, 'organizations': orgs_result}  # store the final counts
+            task['result'] = {'contacts': contacts_result, 'organizations': orgs_result, 'targets': targets}  # store the final counts
         except Exception as exc:
             db.session.rollback()                    # if anything went wrong, undo all database changes
             import traceback
@@ -2216,6 +2317,28 @@ def create_app(config_class=Config):
         file_bytes = f.read()
         filename = f.filename
         archive_missing = request.form.get('archive_missing') == '1'
+        # "Add to" choices from the import dialog. add_contacts defaults to on
+        # so a client that doesn't send it gets the normal import.
+        form = request.form
+        opts = {'add_to_crm': form.get('add_contacts', '1') == '1', 'user_id': current_user.id}
+        if form.get('add_group') == '1':
+            gid = (form.get('group_id') or '').strip()
+            if gid:
+                if not gid.isdigit() or db.session.get(Group, int(gid)) is None:
+                    return jsonify({'error': 'selected group not found'}), 400
+                opts['group_id'] = int(gid)
+            elif (form.get('group_name') or '').strip():
+                opts['group_name'] = form['group_name'].strip()[:256]
+            else:
+                return jsonify({'error': 'pick a group or enter a name for a new one'}), 400
+        if form.get('add_org') == '1':
+            org = (form.get('organization') or '').strip()[:256]
+            if not org:
+                return jsonify({'error': 'pick an organization or enter a name for a new one'}), 400
+            opts['organization'] = org
+            opts['org_category'] = (form.get('org_category') or '').strip()[:128] or None
+        if not (opts['add_to_crm'] or 'group_id' in opts or 'group_name' in opts or 'organization' in opts):
+            return jsonify({'error': 'choose at least one place to add the contacts'}), 400
         task_id = str(uuid_mod.uuid4())
         _upload_tasks[task_id] = {'status': 'running', 'progress': 0, 'result': None, 'error': None}
         # Vercel freezes the function once the response is sent (killing any
@@ -2224,14 +2347,14 @@ def create_app(config_class=Config):
         # result directly -- admin.js's doUpload() already handles a response
         # with no task_id.
         if os.environ.get('VERCEL'):
-            _run_import_task(app, task_id, file_bytes, filename, archive_missing)
+            _run_import_task(app, task_id, file_bytes, filename, archive_missing, opts)
             task = _upload_tasks.pop(task_id)
             if task['status'] == 'error':
                 return jsonify({'error': task['error']}), 500
             return jsonify(task['result'])
         t = threading.Thread(
             target=_run_import_task,
-            args=(app, task_id, file_bytes, filename, archive_missing),
+            args=(app, task_id, file_bytes, filename, archive_missing, opts),
             daemon=True,
         )
         t.start()
@@ -2244,6 +2367,30 @@ def create_app(config_class=Config):
         if not task:
             return jsonify({'error': 'task not found'}), 404
         return jsonify(task)
+
+    @app.route('/api/upload/targets')
+    @login_required
+    def upload_targets():
+        # Everything the import dialog's "Add to" pickers need, unpaginated:
+        # every group, every org name (directory entries plus names that only
+        # exist on contacts), and the directory categories for a new org.
+        if not current_user.is_admin:
+            return jsonify({'error': 'admin only'}), 403
+        groups = [{'id': g.id, 'name': g.name, 'contact_count': len(g.contact_ids or [])}
+                  for g in Group.query.order_by(func.lower(Group.name)).all()]
+        names = {}
+        for (n,) in db.session.query(OutreachOrg.organization).all():
+            if n and n.strip():
+                names.setdefault(n.strip().lower(), n.strip())
+        for (n,) in db.session.query(Contact.organization).filter(Contact.deleted_at.is_(None)).distinct().all():
+            if n and n.strip():
+                names.setdefault(n.strip().lower(), n.strip())
+        categories = ordered_org_categories(t for (t,) in db.session.query(OutreachOrg.tag).distinct().all())
+        return jsonify({
+            'groups': groups,
+            'organizations': sorted(names.values(), key=str.lower),
+            'org_categories': categories,
+        })
 
     @app.route('/api/upload/preview', methods=['POST'])
     @login_required
