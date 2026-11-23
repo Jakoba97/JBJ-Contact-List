@@ -1307,7 +1307,7 @@ async function search(){
           <tr>
             <th class="col-star"></th>
             <th>Name</th>
-            <th>Organization</th>
+            <th>Company</th>
             <th>Industry</th>
             <th>Title</th>
             <th class="col-phone">Phone</th>
@@ -1508,8 +1508,10 @@ function bind(){
   const viewOrgBtn = el('viewOrgBtn')
   const viewGroupsBtn = el('viewGroupsBtn')
   if(viewPeopleBtn) viewPeopleBtn.addEventListener('click', ()=> switchView('people', true))
-  if(viewOrgBtn) viewOrgBtn.addEventListener('click', ()=> switchView('organizations', true))
-  if(viewGroupsBtn) viewGroupsBtn.addEventListener('click', ()=> switchView('groups', true))
+  // Organizations and Groups open their own card-grid pages
+  // (/community-directory, /groups-directory).
+  if(viewOrgBtn) viewOrgBtn.addEventListener('click', ()=> { window.location.href = '/community-directory' })
+  if(viewGroupsBtn) viewGroupsBtn.addEventListener('click', ()=> { window.location.href = '/groups-directory' })
   const viewDeletedBtn = el('viewDeletedBtn')
   if(viewDeletedBtn) viewDeletedBtn.addEventListener('click', ()=> switchView('deleted', true))
   const newGroupBtn = el('newGroupBtn')

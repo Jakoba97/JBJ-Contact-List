@@ -837,11 +837,8 @@ def _apply_import_targets(contacts, opts, result):
 
     org = opts.get('organization')
     if org:
-        known = OutreachOrg.query.filter(func.lower(OutreachOrg.organization) == org.lower()).first() \
-            or Contact.query.filter(func.lower(Contact.organization) == org.lower(),
-                                    Contact.id.notin_([c.id for c in unique] or [0])).first()
-        if not known:
-            # Brand-new org: give it a directory entry so it shows up in the
+        if not OutreachOrg.query.filter(func.lower(OutreachOrg.organization) == org.lower()).first():
+            # Not in the directory yet: give it an entry so it shows up in the
             # Organizations view and sidebar, not just on its own page.
             db.session.add(OutreachOrg(tag=opts.get('org_category') or 'Uncategorized', organization=org))
             result['organization_created'] = True
@@ -1868,20 +1865,16 @@ def create_app(config_class=Config):
     @login_required
     def community_directory():
         # Shows every OutreachOrg (the same set as the main page's
-        # Organizations view), grouped by category. The original six civic
-        # categories keep their fixed order up top; any other category in the
-        # data follows alphabetically, and orgs with no category go last.
+        # Organizations view), grouped by category. Every category in
+        # ORG_CATEGORIES gets a filter chip even with no orgs yet (e.g. a new
+        # Community Stakeholders); the six civic categories come first, the
+        # rest alphabetically, and orgs with no category go last.
         uncategorized = "Uncategorized"
-        civic_order = [
-            "Dallas Civic", "Civil Rights & Advocacy", "Business Chambers",
-            "Development & Transportation", "Nonprofit & Community", "Women's & Cultural",
-        ]
         all_orgs = OutreachOrg.query.order_by(func.lower(OutreachOrg.organization)).all()
         grouped = {}
         for o in all_orgs:
             grouped.setdefault((o.tag or '').strip() or uncategorized, []).append(o)
-        others = sorted((t for t in grouped if t not in civic_order and t != uncategorized), key=str.lower)
-        civic_tags = [t for t in civic_order if t in grouped] + others
+        civic_tags = ordered_org_categories(t for t in grouped if t != uncategorized)
         if uncategorized in grouped:
             civic_tags.append(uncategorized)
         return render_template('community_directory.html',
@@ -1997,8 +1990,8 @@ def create_app(config_class=Config):
     def section_categories():
         # Categories for the Sections/outreach-checklist page (its own tag set,
         # separate from Contact.tag since the two sheets label categories differently).
-        tags = [t[0] for t in db.session.query(OutreachOrg.tag).distinct().all()]
-        return jsonify(sorted([t for t in tags if t]))
+        # Includes the standard categories even before any org uses them.
+        return jsonify(ordered_org_categories(t for (t,) in db.session.query(OutreachOrg.tag).distinct().all()))
 
     @app.route('/api/section-stats', methods=['GET'])
     def section_stats():
@@ -2246,11 +2239,7 @@ def create_app(config_class=Config):
     def archived_group_id(name):
         return hashlib.sha1(name.encode('utf-8')).hexdigest()[:16]
 
-    # Admin-only, like the delete below: staff don't see the archived lists.
-    @app.route('/api/archived-groups', methods=['GET'])
-    def list_archived_groups():
-        if not current_user.is_admin:
-            return jsonify({'error': 'admin only'}), 403
+    def archived_group_summaries():
         rows = db.session.query(Contact.archived_constant_contact).filter(
             Contact.deleted_at.is_(None),
             Contact.archived_constant_contact.isnot(None),
@@ -2262,7 +2251,73 @@ def create_app(config_class=Config):
         groups = [{'id': archived_group_id(name), 'name': name, 'contact_count': count}
                   for name, count in counts.items()]
         groups.sort(key=lambda g: g['name'].lower())
-        return jsonify(groups)
+        return groups
+
+    # Admin-only, like the delete below: staff don't see the archived lists.
+    @app.route('/api/archived-groups', methods=['GET'])
+    def list_archived_groups():
+        if not current_user.is_admin:
+            return jsonify({'error': 'admin only'}), 403
+        return jsonify(archived_group_summaries())
+
+    def _group_page(*, name, contacts, **extra):
+        # Shared by real groups and archived lists: same layout as the
+        # organization page (header, stat tiles, contact cards, sidebar).
+        orgs = {}
+        for c in contacts:
+            if c.organization:
+                orgs[c.organization] = orgs.get(c.organization, 0) + 1
+        return render_template('group_detail.html',
+            name=name,
+            contacts=contacts,
+            orgs=sorted(orgs.items(), key=lambda kv: (-kv[1], kv[0].lower())),
+            avg_score=round(sum(c._score() for c in contacts) / len(contacts)) if contacts else 0,
+            can_export=current_user.is_admin or current_user.can_export_contacts,
+            **extra,
+        )
+
+    @app.route('/groups/<int:group_id>')
+    @login_required
+    def group_detail_page(group_id):
+        g = Group.query.get_or_404(group_id)
+        ids = g.contact_ids or []
+        contacts = Contact.query.filter(Contact.id.in_(ids), Contact.deleted_at.is_(None)) \
+            .order_by(func.lower(Contact.last_name), func.lower(Contact.first_name)).all() if ids else []
+        return _group_page(name=g.name, contacts=contacts, group=g, archived_id=None)
+
+    @app.route('/archived-groups/<group_id>')
+    @login_required
+    def archived_group_page(group_id):
+        if not current_user.is_admin:
+            abort(403)
+        name, contacts = None, []
+        for c in Contact.query.filter(Contact.deleted_at.is_(None),
+                                      Contact.archived_constant_contact.isnot(None)).all():
+            for n in (c.archived_constant_contact or []):
+                if archived_group_id(n) == group_id:
+                    name = n
+                    contacts.append(c)
+                    break
+        if name is None:
+            abort(404)
+        contacts.sort(key=lambda c: ((c.last_name or '').lower(), (c.first_name or '').lower()))
+        return _group_page(name=name, contacts=contacts, group=None, archived_id=group_id)
+
+    @app.route('/groups-directory')
+    @login_required
+    def groups_directory():
+        # Card-grid page for groups, styled like /community-directory. Each
+        # card opens the group's own page (/groups/<id>, /archived-groups/<id>).
+        groups = Group.query.order_by(func.lower(Group.name)).all()
+        members = set()
+        for g in groups:
+            members.update(g.contact_ids or [])
+        archived = archived_group_summaries() if current_user.is_admin else []
+        return render_template('groups_directory.html',
+            groups=groups,
+            archived=archived,
+            member_total=len(members),
+        )
 
     @app.route('/api/archived-groups/<group_id>', methods=['GET'])
     def get_archived_group(group_id):
@@ -2372,23 +2427,23 @@ def create_app(config_class=Config):
     @login_required
     def upload_targets():
         # Everything the import dialog's "Add to" pickers need, unpaginated:
-        # every group, every org name (directory entries plus names that only
-        # exist on contacts), and the directory categories for a new org.
+        # every group, the Organizations-page directory (OutreachOrg only --
+        # not the free-text company names on contacts) with each org's
+        # category, and the categories offered for a new org.
         if not current_user.is_admin:
             return jsonify({'error': 'admin only'}), 403
         groups = [{'id': g.id, 'name': g.name, 'contact_count': len(g.contact_ids or [])}
                   for g in Group.query.order_by(func.lower(Group.name)).all()]
-        names = {}
-        for (n,) in db.session.query(OutreachOrg.organization).all():
-            if n and n.strip():
-                names.setdefault(n.strip().lower(), n.strip())
-        for (n,) in db.session.query(Contact.organization).filter(Contact.deleted_at.is_(None)).distinct().all():
-            if n and n.strip():
-                names.setdefault(n.strip().lower(), n.strip())
+        orgs, seen = [], set()
+        for o in OutreachOrg.query.order_by(func.lower(OutreachOrg.organization)).all():
+            name = (o.organization or '').strip()
+            if name and name.lower() not in seen:
+                seen.add(name.lower())
+                orgs.append({'name': name, 'category': (o.tag or '').strip() or 'Uncategorized'})
         categories = ordered_org_categories(t for (t,) in db.session.query(OutreachOrg.tag).distinct().all())
         return jsonify({
             'groups': groups,
-            'organizations': sorted(names.values(), key=str.lower),
+            'organizations': orgs,
             'org_categories': categories,
         })
 

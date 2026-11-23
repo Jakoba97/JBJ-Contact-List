@@ -18,6 +18,31 @@
     .od-header-actions { margin-left: auto; display: flex; gap: 10px; }
     .od-header-actions .btn { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.3); color: #fff; }
     .od-header-actions .btn:hover { background: rgba(255,255,255,.22); }
+    .od-header-actions .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* Add Contacts to Group window */
+    .og-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .og-overlay[hidden] { display: none; }
+    .og-modal { background: #fff; border-radius: 16px; padding: 28px; width: 520px; max-width: 100%; max-height: 85vh; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+    .og-modal h3 { margin: 0; font-size: 18px; }
+    .og-sub { margin: -8px 0 0; font-size: 13px; color: #666; }
+    .og-label { font-size: 12px; font-weight: 700; color: #444; display: flex; flex-direction: column; gap: 5px; }
+    .og-modal select, .og-modal input[type=text] { padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 13px; font-family: inherit; }
+    .og-list-head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 700; color: #444; }
+    .og-list-head label { font-weight: 600; color: #666; display: flex; gap: 6px; align-items: center; cursor: pointer; }
+    .og-list { border: 1px solid #e5e7eb; border-radius: 10px; overflow-y: auto; max-height: 300px; }
+    .og-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #f1f1f1; font-size: 13px; cursor: pointer; }
+    .og-item:last-child { border-bottom: 0; }
+    .og-item input { margin-top: 2px; }
+    .og-item small { display: block; color: #888; font-size: 12px; }
+    .og-msg { margin: 0; font-size: 13px; font-weight: 600; }
+    .og-msg.error { color: #b91c1c; }
+    .og-msg.ok { color: #166534; }
+    .og-actions { display: flex; gap: 10px; justify-content: flex-end; }
+    .og-actions button { padding: 9px 18px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+    .og-cancel { border: 1px solid #ddd; background: #f5f5f5; }
+    .og-submit { border: none; background: var(--maroon); color: #fff; font-weight: 600; }
+    .og-submit:disabled { opacity: .6; cursor: wait; }
 
     .od-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 24px 32px 0; }
     .od-stat { background: #fff; border-radius: 12px; padding: 16px 20px; border: 1px solid #eee; }
@@ -75,7 +100,7 @@
       <span class="toolbar-brand-text">CRM</span>
     </div>
     <ul class="toolbar-nav-list">
-      <li><a href="/#search_roles" class="toolbar-nav-link" title="Organizations"><i class="fas fa-building"></i><span class="toolbar-label">Organizations</span></a></li>
+      <li><a href="/community-directory" class="toolbar-nav-link" title="Organizations"><i class="fas fa-building"></i><span class="toolbar-label">Organizations</span></a></li>
       <li><a href="/#search" class="toolbar-nav-link" title="Contacts"><i class="fas fa-address-book"></i><span class="toolbar-label">Contacts</span></a></li>
     </ul>
     <div class="toolbar-footer">
@@ -116,11 +141,14 @@
               if (ref && ref.includes('/community-directory')) {
                 btn.href = '/community-directory';
               } else {
-                btn.href = '/#search_roles';
+                btn.href = '/community-directory';
               }
             })();
           </script>
           <a href="/#search?q={{ org_name|urlencode }}" class="btn"><i class="fas fa-address-book"></i> All Contacts</a>
+          <button type="button" id="odGroupBtn" class="btn" {% if not contacts %}disabled title="This organization has no contacts yet"{% endif %}>
+            <i class="fas fa-user-group"></i> Add Contacts to Group
+          </button>
         </div>
       </div>
     </div>
@@ -236,7 +264,164 @@
     </div>
   </div>
 
+  <!-- Add Contacts to Group window -->
+  {% if contacts %}
+  <div class="og-overlay" id="ogOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="ogTitle">
+    <div class="og-modal">
+      <h3 id="ogTitle"><i class="fas fa-user-group"></i> Add Contacts to Group</h3>
+      <p class="og-sub">Contacts from {{ org_name }}</p>
+
+      <label class="og-label">Group
+        <select id="ogGroupSelect"><option value="">Loading groups…</option></select>
+      </label>
+      <label class="og-label" id="ogNewWrap" hidden>New group name
+        <input type="text" id="ogNewName" maxlength="256" placeholder="e.g. {{ org_name }} Outreach">
+      </label>
+
+      <div class="og-list-head">
+        <span id="ogCount"></span>
+        <label><input type="checkbox" id="ogAll" checked> Select all</label>
+      </div>
+      <div class="og-list" id="ogList">
+        {% for c in contacts %}
+        <label class="og-item">
+          <input type="checkbox" class="og-cb" value="{{ c.id }}" checked>
+          <span>{{ ((c.first_name or '') ~ ' ' ~ (c.last_name or '')).strip() or c.email or '(unnamed)' }}
+            {% if c.title or c.email %}<small>{{ c.title or '' }}{% if c.title and c.email %} · {% endif %}{{ c.email or '' }}</small>{% endif %}
+          </span>
+        </label>
+        {% endfor %}
+      </div>
+
+      <p class="og-msg" id="ogMsg" hidden></p>
+      <div class="og-actions">
+        <button type="button" class="og-cancel" id="ogCancel">Close</button>
+        <button type="button" class="og-submit" id="ogSubmit"><i class="fas fa-user-plus"></i> Add to Group</button>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <script>
+    // Add Contacts to Group: pick some/all of this org's contacts and add them
+    // to an existing group or a new one, via the existing groups API.
+    (function(){
+      const $ = (id)=> document.getElementById(id)
+      const overlay = $('ogOverlay')
+      if(!overlay) return
+      const NEW = '__new__'
+      const boxes = ()=> [...document.querySelectorAll('.og-cb')]
+      let groups = []
+
+      function showMsg(text, kind, link){
+        const m = $('ogMsg')
+        m.textContent = text
+        if(link){
+          m.append(' ')
+          const a = document.createElement('a')
+          a.href = '/#groups'
+          a.textContent = 'View groups'
+          m.append(a)
+        }
+        m.className = 'og-msg ' + kind
+        m.hidden = false
+      }
+      function updateCount(){
+        const n = boxes().filter(b=> b.checked).length
+        $('ogCount').textContent = `${n} of ${boxes().length} selected`
+        $('ogAll').checked = n === boxes().length
+      }
+      async function loadGroups(){
+        const sel = $('ogGroupSelect')
+        try {
+          const r = await fetch('/api/groups?limit=1000')
+          if(!r.ok) throw new Error(`HTTP ${r.status}`)
+          groups = (await r.json()).groups || []
+          sel.innerHTML = ''
+          sel.add(new Option('Choose a group…', ''))
+          groups.forEach(g=> sel.add(new Option(`${g.name} (${g.contact_count})`, String(g.id))))
+        } catch(e){
+          sel.innerHTML = ''
+          sel.add(new Option('Could not load groups', ''))
+        }
+        sel.add(new Option('+ Create new group…', NEW))
+      }
+      function syncNew(){
+        const isNew = $('ogGroupSelect').value === NEW
+        $('ogNewWrap').hidden = !isNew
+        if(isNew) $('ogNewName').focus()
+      }
+      function open(){
+        $('ogMsg').hidden = true
+        overlay.hidden = false
+        updateCount()
+        loadGroups()
+      }
+      function close(){ overlay.hidden = true }
+
+      async function submit(){
+        const ids = boxes().filter(b=> b.checked).map(b=> Number(b.value))
+        if(!ids.length) return showMsg('Select at least one contact.', 'error')
+        const choice = $('ogGroupSelect').value
+        if(!choice) return showMsg('Choose a group, or create a new one.', 'error')
+        const btn = $('ogSubmit')
+        btn.disabled = true
+        try {
+          let groupId, name, before = 0
+          if(choice === NEW){
+            name = $('ogNewName').value.trim()
+            if(!name) return showMsg('Enter a name for the new group.', 'error')
+            const r = await fetch('/api/groups', {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ name, contact_ids: ids }),
+            })
+            const d = await r.json()
+            if(r.status === 409 && d.id){
+              groupId = d.id  // name already taken: add to that group instead
+              before = (groups.find(g=> g.id === d.id) || {}).contact_count || 0
+            } else if(!r.ok){
+              return showMsg(d.error || 'Could not create the group.', 'error')
+            } else {
+              showMsg(`Created group "${d.name}" with ${ids.length} contact${ids.length === 1 ? '' : 's'}.`, 'ok', true)
+              await loadGroups()
+              $('ogGroupSelect').value = String(d.id)
+              syncNew()
+              return
+            }
+          } else {
+            groupId = Number(choice)
+            before = (groups.find(g=> g.id === groupId) || {}).contact_count || 0
+          }
+          const r = await fetch(`/api/groups/${groupId}/contacts`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ contact_ids: ids }),
+          })
+          const d = await r.json()
+          if(!r.ok) return showMsg(d.error || 'Could not add contacts to the group.', 'error')
+          const added = d.contact_count - before
+          const already = ids.length - added
+          showMsg(`Added ${added} contact${added === 1 ? '' : 's'} to "${d.name}"` +
+            (already > 0 ? ` (${already} already in it).` : '.'), 'ok', true)
+          await loadGroups()
+          $('ogGroupSelect').value = String(d.id)
+          syncNew()
+        } catch(e){
+          showMsg('Something went wrong: ' + e.message, 'error')
+        } finally {
+          btn.disabled = false
+        }
+      }
+
+      $('odGroupBtn').addEventListener('click', open)
+      $('ogCancel').addEventListener('click', close)
+      overlay.addEventListener('click', (e)=>{ if(e.target === overlay) close() })
+      document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape' && !overlay.hidden) close() })
+      $('ogGroupSelect').addEventListener('change', syncNew)
+      $('ogAll').addEventListener('change', (e)=>{ boxes().forEach(b=> b.checked = e.target.checked); updateCount() })
+      $('ogList').addEventListener('change', updateCount)
+      $('ogSubmit').addEventListener('click', submit)
+    })()
+
     async function logActivity(){
       const channel = document.getElementById('activityChannel').value
       const summary = document.getElementById('activitySummary').value.trim()

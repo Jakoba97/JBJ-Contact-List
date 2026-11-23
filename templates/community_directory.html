@@ -227,7 +227,7 @@
   } %}
 
   {% for tag in civic_tags %}
-  {% set orgs = grouped[tag] %}
+  {% set orgs = grouped.get(tag, []) %}
   {% if orgs %}
   <div class="cd-category" data-category="{{ tag }}">
     <div class="cd-category-header">

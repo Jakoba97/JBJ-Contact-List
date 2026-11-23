@@ -114,11 +114,24 @@ def test_targets_endpoint(app, admin_client, standard_client):
     with app.app_context():
         db.session.add(Group(name='G1', contact_ids=[1, 2]))
         db.session.add(OutreachOrg(tag='Cat A', organization='Dir Org'))
+        db.session.add(Contact(first_name='X', organization='Contact Only Co'))
         db.session.commit()
     body = admin_client.get('/api/upload/targets').get_json()
     assert {'id': body['groups'][0]['id'], 'name': 'G1', 'contact_count': 2} in body['groups']
-    assert 'Dir Org' in body['organizations']
+    assert {'name': 'Dir Org', 'category': 'Cat A'} in body['organizations']
+    # Only the Organizations-page directory, not company names typed on contacts.
+    assert 'Contact Only Co' not in {o['name'] for o in body['organizations']}
     cats = body['org_categories']
     assert 'Cat A' in cats and 'Community Stakeholders' in cats
     assert cats[0] == 'Dallas Civic' and len(cats) == len(set(cats))
     assert standard_client.get('/api/upload/targets').status_code == 403
+
+
+def test_community_stakeholders_shown_before_any_org_uses_it(app, admin_client):
+    with app.app_context():
+        db.session.add(OutreachOrg(tag='Dallas Civic', organization='Some Org'))
+        db.session.commit()
+    assert 'Community Stakeholders' in admin_client.get('/api/section-categories').get_json()
+    page = admin_client.get('/community-directory').data.decode()
+    assert 'data-filter="Community Stakeholders"' in page
+    assert 'Some Org' in page

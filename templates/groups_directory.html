@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Groups — CRM Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <!-- Same look as community_directory.html (Dallas Community Organizations). -->
+  <style>
+    body { background: #f5f5f7; }
+
+    .cd-header {
+      background: linear-gradient(165deg, var(--maroon) 0%, var(--maroon-dark) 100%);
+      color: #fff;
+      padding: 28px 40px 24px;
+      box-shadow: 0 4px 18px rgba(0,0,0,.18);
+    }
+    .cd-header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .cd-back { color: rgba(255,255,255,.75); text-decoration: none; font-size: 0.83rem; display: inline-flex; align-items: center; gap: 6px; margin-bottom: 14px; }
+    .cd-back:hover { color: #fff; }
+    .cd-title { font-family: var(--font-display); font-size: 1.6rem; font-weight: 400; margin: 0 0 4px; }
+    .cd-subtitle { color: rgba(255,255,255,.75); font-size: 0.88rem; }
+    .cd-stats { display: flex; gap: 28px; margin-top: 18px; }
+    .cd-stat-num { font-size: 1.5rem; font-weight: 700; }
+    .cd-stat-label { font-size: 0.75rem; color: rgba(255,255,255,.65); text-transform: uppercase; letter-spacing: .05em; }
+    .cd-new-btn { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.3); color: #fff; align-self: center; }
+    .cd-new-btn:hover { background: rgba(255,255,255,.22); color: #fff; }
+
+    .cd-controls {
+      background: #fff;
+      border-bottom: 1px solid rgba(148,153,156,.2);
+      padding: 16px 40px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      box-shadow: 0 2px 8px rgba(0,0,0,.06);
+    }
+    .cd-search-wrap { position: relative; flex: 1; min-width: 220px; max-width: 360px; }
+    .cd-search-wrap i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--gray); font-size: 0.85rem; }
+    #cdSearch {
+      width: 100%;
+      border: 1px solid rgba(148,153,156,.35);
+      border-radius: 10px;
+      padding: 9px 12px 9px 34px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      outline: none;
+      background: #f9f9f9;
+    }
+    #cdSearch:focus { border-color: var(--maroon); box-shadow: 0 0 0 3px rgba(173,3,4,.12); background: #fff; }
+
+    .cd-filter-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+    .cd-filter-btn {
+      border: 1px solid rgba(148,153,156,.35);
+      border-radius: 20px;
+      padding: 6px 13px;
+      font-size: 0.78rem;
+      font-family: inherit;
+      background: #f5f5f7;
+      color: var(--charcoal);
+      cursor: pointer;
+      transition: all .15s;
+      font-weight: 500;
+    }
+    .cd-filter-btn:hover { border-color: var(--maroon); color: var(--maroon); }
+    .cd-filter-btn.active { background: var(--maroon); border-color: var(--maroon); color: #fff; }
+
+    .cd-body { padding: 28px 40px; max-width: 1380px; }
+
+    .cd-no-results { text-align: center; padding: 60px 20px; color: var(--gray); display: none; }
+    .cd-no-results i { font-size: 2rem; margin-bottom: 10px; display: block; color: var(--rose); }
+    .cd-empty { color: var(--gray); font-style: italic; font-size: 0.88rem; }
+
+    .cd-category { margin-bottom: 44px; }
+    .cd-category-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid var(--maroon);
+    }
+    .cd-category-icon {
+      width: 32px; height: 32px;
+      border-radius: 8px;
+      background: var(--maroon);
+      color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+    .cd-category-name { font-family: var(--font-display); font-size: 1rem; font-weight: 400; color: var(--maroon-dark); }
+    .cd-category-count {
+      margin-left: auto;
+      font-size: 0.78rem;
+      color: var(--gray);
+      background: #f0f0f0;
+      border-radius: 12px;
+      padding: 3px 10px;
+      font-weight: 600;
+    }
+
+    .cd-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .org-card {
+      background: #fff;
+      border: 1px solid rgba(148,153,156,.18);
+      border-top: 3px solid rgba(148,153,156,.2);
+      border-radius: 14px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: var(--card-shadow);
+      transition: transform .15s, box-shadow .15s, border-top-color .15s;
+    }
+    .org-card:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(0,0,0,.11); border-top-color: var(--maroon); }
+    .org-card-name { font-weight: 700; font-size: 0.93rem; color: var(--black); line-height: 1.3; overflow-wrap: anywhere; }
+    .org-card-meta { font-size: 0.78rem; color: var(--gray); display: flex; align-items: center; gap: 6px; }
+    .org-card-desc { font-size: 0.82rem; color: #555; line-height: 1.55; flex: 1; }
+    .org-card-actions { display: flex; gap: 8px; margin-top: 6px; }
+    .org-card-actions .btn { font-size: 0.78rem; padding: 6px 12px; min-height: 0; border-radius: 8px; }
+
+    /* New Group window */
+    .ng-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .ng-overlay[hidden] { display: none; }
+    .ng-box { background: #fff; border-radius: 18px; padding: 28px; width: 100%; max-width: 460px; box-shadow: 0 20px 60px rgba(0,0,0,.25); display: flex; flex-direction: column; gap: 14px; }
+    .ng-title { font-family: var(--font-display); font-size: 1.1rem; margin: 0; color: var(--maroon-dark); }
+    .ng-box label { font-size: 0.78rem; font-weight: 600; color: var(--charcoal); text-transform: uppercase; letter-spacing: .04em; display: flex; flex-direction: column; gap: 4px; }
+    .ng-box input, .ng-box textarea { border: 1px solid rgba(148,153,156,.4); border-radius: 8px; padding: 9px 12px; font-size: 0.88rem; font-family: inherit; outline: none; text-transform: none; letter-spacing: normal; font-weight: 400; }
+    .ng-box textarea { min-height: 80px; resize: vertical; }
+    .ng-box input:focus, .ng-box textarea:focus { border-color: var(--maroon); box-shadow: 0 0 0 3px rgba(173,3,4,.12); }
+    .ng-error { margin: 0; font-size: 0.85rem; color: var(--maroon); font-weight: 600; }
+    .ng-error[hidden] { display: none; }
+    .ng-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+    @media (max-width: 680px) {
+      .cd-header, .cd-controls, .cd-body { padding-left: 16px; padding-right: 16px; }
+      .cd-title { font-size: 1.25rem; }
+      .cd-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="cd-header">
+  <a href="/#search" class="cd-back"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+  <div class="cd-header-row">
+    <div>
+      <div class="cd-title">Groups</div>
+      <div class="cd-subtitle">Hand-picked contact lists{% if current_user.is_admin %}, plus lists carried over from Constant Contact{% endif %}</div>
+      <div class="cd-stats">
+        <div class="cd-stat">
+          <div class="cd-stat-num">{{ groups|length }}</div>
+          <div class="cd-stat-label">Groups</div>
+        </div>
+        <div class="cd-stat">
+          <div class="cd-stat-num">{{ member_total }}</div>
+          <div class="cd-stat-label">Contacts in Groups</div>
+        </div>
+        {% if current_user.is_admin %}
+        <div class="cd-stat">
+          <div class="cd-stat-num">{{ archived|length }}</div>
+          <div class="cd-stat-label">Archived Lists</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    <button type="button" id="newGroupBtn" class="btn cd-new-btn"><i class="fas fa-plus"></i> New Group</button>
+  </div>
+</div>
+
+<div class="cd-controls">
+  <div class="cd-search-wrap">
+    <i class="fas fa-search"></i>
+    <input type="text" id="cdSearch" placeholder="Search groups…" autocomplete="off">
+  </div>
+  <div class="cd-filter-btns">
+    <button class="cd-filter-btn active" data-filter="all">All</button>
+    <button class="cd-filter-btn" data-filter="groups">Groups</button>
+    {% if current_user.is_admin %}
+    <button class="cd-filter-btn" data-filter="archived">Archived Constant Contact</button>
+    {% endif %}
+  </div>
+</div>
+
+<div class="cd-body">
+  <div class="cd-no-results" id="cdNoResults">
+    <i class="fas fa-search"></i>
+    No groups match your search.
+  </div>
+
+  <div class="cd-category" data-category="groups">
+    <div class="cd-category-header">
+      <div class="cd-category-icon"><i class="fas fa-layer-group"></i></div>
+      <span class="cd-category-name">Groups</span>
+      <span class="cd-category-count">{{ groups|length }}</span>
+    </div>
+    {% if groups %}
+    <div class="cd-grid">
+      {% for g in groups %}
+      {% set n = (g.contact_ids or [])|length %}
+      <div class="org-card" data-name="{{ g.name|lower }}" data-desc="{{ (g.description or '')|lower }}">
+        <div class="org-card-name">{{ g.name }}</div>
+        <div class="org-card-meta">
+          <i class="fas fa-user"></i> {{ n }} contact{{ '' if n == 1 else 's' }}
+          {% if g.created_by %}· by {{ g.created_by.display_name }}{% endif %}
+        </div>
+        {% if g.description %}<div class="org-card-desc">{{ g.description }}</div>{% endif %}
+        <div class="org-card-actions">
+          <a href="/groups/{{ g.id }}" class="btn btn-primary btn-sm">
+            <i class="fas fa-arrow-right"></i> View Group
+          </a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="cd-empty">No groups yet. Use <strong>New Group</strong> above to make one.</p>
+    {% endif %}
+  </div>
+
+  {% if current_user.is_admin and archived %}
+  <!-- Read-only lists from the "Archived Constant Contact" import column. -->
+  <div class="cd-category" data-category="archived">
+    <div class="cd-category-header">
+      <div class="cd-category-icon"><i class="fas fa-box-archive"></i></div>
+      <span class="cd-category-name">Archived Constant Contact</span>
+      <span class="cd-category-count">{{ archived|length }}</span>
+    </div>
+    <div class="cd-grid">
+      {% for a in archived %}
+      <div class="org-card" data-name="{{ a.name|lower }}" data-desc="">
+        <div class="org-card-name">{{ a.name }}</div>
+        <div class="org-card-meta"><i class="fas fa-user"></i> {{ a.contact_count }} contact{{ '' if a.contact_count == 1 else 's' }}</div>
+        <div class="org-card-actions">
+          <a href="/archived-groups/{{ a.id }}" class="btn btn-sm">
+            <i class="fas fa-arrow-right"></i> View List
+          </a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="ng-overlay" id="ngOverlay" hidden role="dialog" aria-modal="true" aria-labelledby="ngTitle">
+  <div class="ng-box">
+    <h3 class="ng-title" id="ngTitle">New Group</h3>
+    <label>Name <input type="text" id="ngName" maxlength="256" placeholder="e.g. 2027 Gala Invitees"></label>
+    <label>Description <textarea id="ngDesc" placeholder="Optional"></textarea></label>
+    <p class="ng-error" id="ngError" hidden></p>
+    <div class="ng-actions">
+      <button type="button" class="btn" id="ngCancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="ngSave"><i class="fas fa-plus"></i> Create Group</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  // New Group: create it, then go straight to its page to add contacts.
+  const overlay = document.getElementById('ngOverlay');
+  const nameEl = document.getElementById('ngName');
+  const errEl = document.getElementById('ngError');
+  const close = () => { overlay.hidden = true; };
+  document.getElementById('newGroupBtn').addEventListener('click', () => {
+    errEl.hidden = true; overlay.hidden = false; nameEl.focus();
+  });
+  document.getElementById('ngCancel').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.hidden) close(); });
+  document.getElementById('ngSave').addEventListener('click', async () => {
+    const name = nameEl.value.trim();
+    const showErr = (m) => { errEl.textContent = m; errEl.hidden = false; };
+    if (!name) return showErr('Enter a name for the group.');
+    try {
+      const r = await fetch('/api/groups', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name, description: document.getElementById('ngDesc').value }),
+      });
+      const d = await r.json();
+      if (r.status === 409) return showErr('A group with that name already exists.');
+      if (!r.ok) return showErr(d.error || 'Could not create the group.');
+      window.location.href = '/groups/' + d.id;
+    } catch (e) { showErr('Could not reach the server.'); }
+  });
+})();
+
+(function () {
+  // Same search + chip filtering as the organizations page.
+  const searchEl = document.getElementById('cdSearch');
+  const noResults = document.getElementById('cdNoResults');
+  const filterBtns = document.querySelectorAll('.cd-filter-btn');
+  const categories = document.querySelectorAll('.cd-category');
+  let activeFilter = 'all';
+
+  function applyFilters() {
+    const q = searchEl.value.trim().toLowerCase();
+    let anyVisible = false;
+    categories.forEach(catEl => {
+      const catMatch = activeFilter === 'all' || activeFilter === catEl.dataset.category;
+      if (!catMatch) { catEl.style.display = 'none'; return; }
+      const cards = catEl.querySelectorAll('.org-card');
+      // A section with no cards (no groups yet) stays visible with its
+      // empty message unless the user is searching.
+      if (!cards.length) { catEl.style.display = q ? 'none' : ''; if (!q) anyVisible = true; return; }
+      let catHasVisible = false;
+      cards.forEach(card => {
+        const show = !q || card.dataset.name.includes(q) || card.dataset.desc.includes(q);
+        card.style.display = show ? '' : 'none';
+        if (show) catHasVisible = true;
+      });
+      catEl.style.display = catHasVisible ? '' : 'none';
+      if (catHasVisible) anyVisible = true;
+    });
+    noResults.style.display = anyVisible ? 'none' : 'block';
+  }
+
+  searchEl.addEventListener('input', applyFilters);
+  filterBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      filterBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeFilter = btn.dataset.filter;
+      applyFilters();
+    });
+  });
+})();
+</script>
+</body>
+</html>

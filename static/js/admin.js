@@ -144,6 +144,34 @@ function fillSelect(sel, placeholder, items, newLabel){
   if(newLabel) sel.add(new Option(newLabel, NEW_OPTION))
 }
 
+// Organizations-page directory, one heading per category in the same order
+// as the category chips; categories not in that list (e.g. Uncategorized) last.
+// Every category gets a heading, even one with no organizations yet.
+function fillOrgSelect(sel, orgs, categoryOrder){
+  sel.innerHTML = ''
+  sel.add(new Option('Choose an organization…', ''))
+  const byCat = new Map()
+  orgs.forEach(o=>{
+    if(!byCat.has(o.category)) byCat.set(o.category, [])
+    byCat.get(o.category).push(o.name)
+  })
+  const cats = categoryOrder
+    .concat([...byCat.keys()].filter(c=> !categoryOrder.includes(c)))
+  cats.forEach(cat=>{
+    const group = document.createElement('optgroup')
+    group.label = cat
+    const names = byCat.get(cat) || []
+    names.forEach(name=> group.appendChild(new Option(name, name)))
+    if(!names.length){
+      const empty = new Option('No organizations yet', '')
+      empty.disabled = true
+      group.appendChild(empty)
+    }
+    sel.appendChild(group)
+  })
+  sel.add(new Option('+ Create new organization…', NEW_OPTION))
+}
+
 async function loadImportTargets(){
   try {
     const r = await fetch('/api/upload/targets')
@@ -151,8 +179,7 @@ async function loadImportTargets(){
     const t = await r.json()
     fillSelect($('tgtGroupSelect'), 'Choose a group…',
       t.groups.map(g=>[String(g.id), `${g.name} (${g.contact_count})`]), '+ Create new group…')
-    fillSelect($('tgtOrgSelect'), 'Choose an organization…',
-      t.organizations.map(o=>[o, o]), '+ Create new organization…')
+    fillOrgSelect($('tgtOrgSelect'), t.organizations, t.org_categories)
     fillSelect($('tgtOrgCategory'), 'Select category…',
       t.org_categories.map(c=>[c, c]), null)
   } catch(e){
