@@ -7,9 +7,16 @@ os.environ.pop('BOOTSTRAP_ADMIN_USERNAME', None)
 os.environ.pop('BOOTSTRAP_ADMIN_PASSWORD', None)
 os.environ.pop('SENTRY_DSN', None)
 
+import app as app_module
 from app import create_app, limiter
 from db import db
 from models import User
+
+# create_app() fills an empty database with ~60 fake demo contacts
+# (_seed_demo_contacts). Every test starts with an empty database, so turn
+# that off here -- tests count and match contacts and need to start from
+# zero. The app itself is unchanged.
+app_module._seed_demo_contacts = lambda: None
 
 
 class TestConfig:
@@ -39,6 +46,11 @@ def app():
     application.config['_db_path'] = db_path
     yield application
 
+    # Close the database's open connections before deleting the file --
+    # Windows won't delete a file that's still open (WinError 32).
+    with application.app_context():
+        db.session.remove()
+        db.engine.dispose()
     os.close(db_fd)
     os.unlink(db_path)
 

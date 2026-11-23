@@ -120,8 +120,11 @@ def test_needs_followup_filter_excludes_recently_contacted(standard_client):
 
 
 def test_new_contact_defaults_to_not_favorite(standard_client):
+    # Favorites are per-user, so is_favorite is reported when a contact is
+    # loaded (the create response doesn't include it).
     res = standard_client.post('/api/contacts', json={'first_name': 'A', 'last_name': 'B'})
-    assert res.get_json()['is_favorite'] is False
+    contact_id = res.get_json()['id']
+    assert standard_client.get(f'/api/contacts/{contact_id}').get_json()['is_favorite'] is False
 
 
 def test_favorite_toggle_and_filter(standard_client):
@@ -194,28 +197,45 @@ def test_delete_contact_requires_admin(standard_client):
     assert res.status_code == 200
 
 
+def _listed_ids(client, **params):
+    res = client.get('/api/contacts', query_string={'limit': 100, **params})
+    return {c['id'] for c in res.get_json()['contacts']}
+
+
 def test_admin_can_delete_contact(admin_client):
+    # Delete moves the contact to the trash (soft delete) so it can be
+    # restored: it drops out of the normal list and shows in the trash view.
     res = admin_client.post('/api/contacts', json={'first_name': 'To', 'last_name': 'Delete'})
     contact_id = res.get_json()['id']
+    assert contact_id in _listed_ids(admin_client)
 
     res = admin_client.delete(f'/api/contacts/{contact_id}')
     assert res.status_code == 200
 
-    res = admin_client.get(f'/api/contacts/{contact_id}')
-    assert res.status_code == 404
+    assert contact_id not in _listed_ids(admin_client)
+    assert contact_id in _listed_ids(admin_client, show_deleted='1')
+
+    assert admin_client.post(f'/api/contacts/{contact_id}/restore').status_code == 200
+    assert contact_id in _listed_ids(admin_client)
 
 
-def test_delete_contact_also_deletes_its_activity(app, admin_client):
+def test_trashing_contact_keeps_activity_and_purge_removes_it(app, admin_client):
+    # Trashing keeps the contact's activity history (it comes back on
+    # restore); permanently deleting (purge) removes the contact and it.
+    from db import db
+    from models import Activity, Contact
     res = admin_client.post('/api/contacts', json={'first_name': 'Has', 'last_name': 'Activity'})
     contact_id = res.get_json()['id']
     admin_client.post(f'/api/contacts/{contact_id}/activity', json={'summary': 'called'})
 
-    res = admin_client.delete(f'/api/contacts/{contact_id}')
-    assert res.status_code == 200
-
+    assert admin_client.delete(f'/api/contacts/{contact_id}').status_code == 200
     with app.app_context():
-        from models import Activity
+        assert Activity.query.filter_by(contact_id=contact_id).count() == 1
+
+    assert admin_client.delete(f'/api/contacts/{contact_id}/purge').status_code == 200
+    with app.app_context():
         assert Activity.query.filter_by(contact_id=contact_id).count() == 0
+        assert db.session.get(Contact, contact_id) is None
 
 
 def test_delete_contact_is_audit_logged(admin_client):
